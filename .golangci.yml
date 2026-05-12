@@ -1,0 +1,46 @@
+run:
+  timeout: 5m
+  go: "1.25"
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - gocritic
+    - revive
+    - misspell
+    - gofmt
+    - gofumpt
+    - gosimple
+    - prealloc
+    - unconvert
+    - unparam
+    - nilnil
+
+linters-settings:
+  revive:
+    severity: warning
+    rules:
+      - name: line-length-limit
+        arguments: [140]
+      - name: exported
+  gosec:
+    excludes:
+      - G101  # hardcoded creds (false positives in cert templates)
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+        - gocritic
+  # Line-level //nolint: directives are respected by default.
+  max-issues-per-linter: 0
+  max-same-issues: 0

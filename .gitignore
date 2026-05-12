@@ -1,0 +1,24 @@
+# binaries
+/bin/
+mkdev
+mkdev.exe
+
+# go
+*.test
+*.out
+coverage.txt
+
+# state
+.mkdev/
+*.pem
+*.key
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+.claude
+.crush
+CLAUDE.md
+

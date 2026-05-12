@@ -1,0 +1,70 @@
+package cli_test
+
+import (
+	"bytes"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"github.com/venkatkrishna07/mkdev/internal/cli"
+)
+
+func TestRootHelp(t *testing.T) {
+	root := cli.New()
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetArgs([]string{"--help"})
+	require.NoError(t, root.Execute())
+	require.Contains(t, buf.String(), "mkdev")
+}
+
+func TestRootListsSubcommands(t *testing.T) {
+	root := cli.New()
+	names := map[string]bool{}
+	for _, c := range root.Commands() {
+		names[c.Name()] = true
+	}
+	for _, want := range []string{"add", "remove", "list", "serve", "install", "uninstall", "hosts-helper", "tui"} {
+		require.True(t, names[want], "missing subcommand %s", want)
+	}
+}
+
+func TestRootArgErrors(t *testing.T) {
+	root := cli.New()
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{"add", "only-one-arg"})
+	err := root.Execute()
+	require.Error(t, err, "add with 1 arg should error")
+}
+
+func TestRemoveRequiresOneArg(t *testing.T) {
+	root := cli.New()
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{"remove"})
+	err := root.Execute()
+	require.Error(t, err, "remove with 0 args should error")
+}
+
+func TestListWorksOnFreshHome(t *testing.T) {
+	t.Setenv("MKDEV_HOME", t.TempDir())
+	root := cli.New()
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetArgs([]string{"list"})
+	require.NoError(t, root.Execute())
+	out := buf.String()
+	require.Contains(t, out, "DOMAIN")
+}
+
+func TestListJSONWorksOnFreshHome(t *testing.T) {
+	t.Setenv("MKDEV_HOME", t.TempDir())
+	root := cli.New()
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetArgs([]string{"list", "--json"})
+	require.NoError(t, root.Execute())
+	require.Equal(t, "[]\n", buf.String())
+}
