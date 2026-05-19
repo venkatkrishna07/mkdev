@@ -61,9 +61,13 @@ func tableStyles(th styles.Theme) table.Styles {
 const (
 	domainsStatusW    = 12
 	domainsSourceW    = 12
-	domainsDetailW    = 32
-	domainsDetailMinW = 100
+	domainsDetailW    = 34 // content width inside border+padding
+	domainsDetailMinW = 110
+	domainsGap        = 1
 )
+
+// detailOuterW = content + horizontal border (2).
+func detailOuterW() int { return domainsDetailW + 2 }
 
 func (d *Domains) tableWidth() int {
 	w := d.width
@@ -71,7 +75,7 @@ func (d *Domains) tableWidth() int {
 		w = 100
 	}
 	if w >= domainsDetailMinW {
-		return w - domainsDetailW - 2
+		return w - detailOuterW() - domainsGap
 	}
 	return w
 }
@@ -165,18 +169,18 @@ func (d Domains) View() string {
 	if w < domainsDetailMinW {
 		return d.table.View()
 	}
-	leftW := w - domainsDetailW - 2
+	leftW := w - detailOuterW() - domainsGap
 	left := lipgloss.NewStyle().Width(leftW).Render(d.table.View())
 	right := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(d.th.Primary).
 		Padding(0, 1).
 		Width(domainsDetailW).
-		Render(d.detailPane())
+		Render(d.detailPane(domainsDetailW - 2))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 }
 
-func (d Domains) detailPane() string {
+func (d Domains) detailPane(innerW int) string {
 	r, ok := d.Selected()
 	if !ok {
 		return d.th.Dim.Render("select a route")
@@ -189,26 +193,34 @@ func (d Domains) detailPane() string {
 	}
 	share := boolWord(r.Shared, "LAN", "local-only")
 	added := r.AddedAt.Format("2006-01-02")
+	sparkW := max(innerW-12, 6) // "RTT  " + " 999ms" overhead
 	rttRow := d.th.Dim.Render("RTT  ") + d.th.Dim.Render("—")
 	if d.rtt != nil {
 		xs := d.rtt(r.Domain)
 		if len(xs) > 0 {
 			last := xs[len(xs)-1].Milliseconds()
-			rttRow = d.th.Dim.Render("RTT  ") + components.SparklineDur(d.th, xs, 16) + " " + d.th.Title.Render(fmt.Sprintf("%dms", last))
+			rttRow = d.th.Dim.Render("RTT  ") + components.SparklineDur(d.th, xs, sparkW) + " " + d.th.Title.Render(fmt.Sprintf("%dms", last))
 		}
 	}
 	lines := []string{
-		d.th.Title.Render(r.Domain),
-		d.th.Dim.Render("→ ") + r.Target,
+		d.th.Title.Render(trunc(r.Domain, innerW)),
+		d.th.Dim.Render("→ ") + trunc(r.Target, innerW-2),
 		"",
 		d.th.Dim.Render("status ") + statusStyle.Render(status),
 		d.th.Dim.Render("share  ") + share,
-		d.th.Dim.Render("source ") + r.Source,
+		d.th.Dim.Render("source ") + trunc(r.Source, innerW-7),
 		d.th.Dim.Render("added  ") + added,
 		"",
 		rttRow,
 	}
 	return strings.Join(lines, "\n")
+}
+
+func trunc(s string, n int) string {
+	if n <= 1 || len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }
 
 func (d Domains) Selected() (store.Route, bool) {
