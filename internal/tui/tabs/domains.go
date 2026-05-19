@@ -152,14 +152,18 @@ func (d *Domains) refreshRows() {
 	d.fitHeight()
 }
 
+// statusCell returns the visible status label. No ANSI styling — bubbles/table
+// truncates each cell with runewidth before the style render, which counts ANSI
+// escape bytes toward visible width and mangles the output. Color belongs to
+// the row Selected style only.
 func (d Domains) statusCell(r store.Route) string {
 	switch {
 	case !r.Enabled:
-		return d.th.PillOff.Render("● off")
+		return "● off"
 	case d.rtt != nil && len(d.rtt(r.Domain)) > 0:
-		return d.th.PillUp.Render("● live")
+		return "● live"
 	default:
-		return d.th.PillUp.Render("● up")
+		return "● up"
 	}
 }
 
