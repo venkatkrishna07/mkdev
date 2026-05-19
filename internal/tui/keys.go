@@ -2,7 +2,6 @@ package tui
 
 import "github.com/charmbracelet/bubbles/key"
 
-// KeyMap holds all root-level (Domains tab) keybindings.
 type KeyMap struct {
 	Add     key.Binding
 	Edit    key.Binding
@@ -21,25 +20,23 @@ type KeyMap struct {
 	Tab3    key.Binding
 	Tab4    key.Binding
 	Tab5    key.Binding
+	Tab6    key.Binding
 }
 
-// ShortHelp returns the keybindings shown in the short (footer) help.
 func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{k.Add, k.Edit, k.Delete, k.Toggle, k.Share, k.Open, k.Help, k.Quit}
 }
 
-// FullHelp returns columns of keybindings for the expanded help view.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Open, k.Toggle, k.Share},
 		{k.Add, k.Edit, k.Delete},
 		{k.NextTab, k.PrevTab},
-		{k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.Tab5},
+		{k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.Tab5, k.Tab6},
 		{k.Help, k.Quit},
 	}
 }
 
-// DefaultKeyMap is the standard binding set for the root model.
 var DefaultKeyMap = KeyMap{
 	Add:     key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 	Edit:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
@@ -53,9 +50,10 @@ var DefaultKeyMap = KeyMap{
 	Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	NextTab: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next tab")),
 	PrevTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("⇧tab", "prev tab")),
-	Tab1:    key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "domains")),
-	Tab2:    key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "projects")),
-	Tab3:    key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "logs")),
-	Tab4:    key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "doctor")),
-	Tab5:    key.NewBinding(key.WithKeys("5"), key.WithHelp("5", "settings")),
+	Tab1:    key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "dashboard")),
+	Tab2:    key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "domains")),
+	Tab3:    key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "projects")),
+	Tab4:    key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "logs")),
+	Tab5:    key.NewBinding(key.WithKeys("5"), key.WithHelp("5", "doctor")),
+	Tab6:    key.NewBinding(key.WithKeys("6"), key.WithHelp("6", "settings")),
 }

@@ -31,6 +31,11 @@ func NewIssuer(ca *CA, knownHost func(string) bool) *Issuer {
 	return &Issuer{ca: ca, knownHost: knownHost, cache: map[string]*tls.Certificate{}}
 }
 
+// CACert returns the parsed root CA certificate. Safe to call from any goroutine.
+func (i *Issuer) CACert() *x509.Certificate {
+	return i.ca.Cert
+}
+
 // Issue returns (and caches) a leaf cert valid for host.
 func (i *Issuer) Issue(host string) (*tls.Certificate, error) {
 	i.mu.RLock()

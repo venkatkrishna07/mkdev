@@ -36,7 +36,7 @@ func TestProxyEndToEnd(t *testing.T) {
 
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{GetCertificate: is.GetCertificate, MinVersion: tls.VersionTLS13})
 	require.NoError(t, err)
-	srv := proxy.NewServer(r, ln)
+	srv := proxy.NewServer(r, ln, nil)
 	go func() { _ = srv.Serve() }()
 	t.Cleanup(func() { _ = srv.Close() })
 
@@ -88,7 +88,7 @@ func TestProxyUnknownHost404(t *testing.T) {
 
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{GetCertificate: is.GetCertificate, MinVersion: tls.VersionTLS13})
 	require.NoError(t, err)
-	srv := proxy.NewServer(r, ln)
+	srv := proxy.NewServer(r, ln, nil)
 	go func() { _ = srv.Serve() }()
 	t.Cleanup(func() { _ = srv.Close() })
 

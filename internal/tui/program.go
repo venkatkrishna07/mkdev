@@ -27,20 +27,30 @@ func NewRootForTest(rt *Runtime) tea.Model { return newRootModel(rt) }
 type tabIndex int
 
 const (
-	tabDomains tabIndex = iota
+	tabDashboard tabIndex = iota
+	tabDomains
 	tabProjects
 	tabLogs
 	tabDoctor
 	tabSettings
 )
 
-var tabLabels = []string{"Domains", "Projects", "Logs", "Doctor", "Settings"}
+var tabLabels = []string{"Dashboard", "Domains", "Projects", "Logs", "Doctor", "Settings"}
+
+var tabSpecs = []components.Tab{
+	{Label: "Dashboard", Icon: "󰕮"},
+	{Label: "Domains", Icon: "󰖟"},
+	{Label: "Projects", Icon: "󰉋"},
+	{Label: "Logs", Icon: "󰦪"},
+	{Label: "Doctor", Icon: "󰋽"},
+	{Label: "Settings", Icon: "󰒓"},
+}
 
 // Run launches the TUI bound to rt. It blocks until the user quits, then
 // cancels the runtime context so the proxy goroutine exits cleanly.
 func Run(rt *Runtime) error {
 	m := newRootModel(rt)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	rt.Cancel()
 	return err
@@ -51,6 +61,7 @@ type rootModel struct {
 	th          styles.Theme
 	width       int
 	height      int
+	dashboard   tabs.Dashboard
 	domains     tabs.Domains
 	logs        tabs.Logs
 	doctor      tabs.Doctor
@@ -68,10 +79,11 @@ type rootModel struct {
 	pendingQuit bool
 	lastErr     error
 	lastErrAt   time.Time
+	splash      bool
 }
 
 func newRootModel(rt *Runtime) rootModel {
-	th := styles.NewTheme()
+	th := styles.NewTheme(rt.Cfg.Theme)
 	bp, err := os.Executable()
 	if err != nil || bp == "" {
 		panic("tui: cannot resolve mkdev binary path: " + fmt.Sprint(err))
@@ -90,19 +102,29 @@ func newRootModel(rt *Runtime) rootModel {
 	sp.Style = th.Title
 
 	logPath := filepath.Join(rt.Home, "logs", "tui.log")
+	dashSrc := tabs.DashSource{
+		Total: rt.Stats.Total,
+		RPS:   rt.Stats.RPS,
+		CA:    rt.Issuer.CACert(),
+		Start: time.Now(),
+	}
 	return rootModel{
-		rt:       rt,
-		th:       th,
-		domains:  tabs.NewDomains(th, 100, 24),
-		logs:     tabs.NewLogs(th, logPath),
-		doctor:   tabs.NewDoctor(th, rt.Home),
-		settings: tabs.NewSettings(th, rt.Home),
-		binPath:  bp,
-		keys:     DefaultKeyMap,
-		help:     h,
-		spinner:  sp,
+		rt:        rt,
+		th:        th,
+		dashboard: tabs.NewDashboard(th, dashSrc),
+		domains:   tabs.NewDomainsWithRTT(th, 100, 24, rt.Stats.Snapshot),
+		logs:      tabs.NewLogs(th, logPath),
+		doctor:    tabs.NewDoctor(th, rt.Home),
+		settings:  tabs.NewSettings(th, rt.Home),
+		binPath:   bp,
+		keys:      DefaultKeyMap,
+		help:      h,
+		spinner:   sp,
+		splash:    true,
 	}
 }
+
+type splashDoneMsg struct{}
 
 // proxyStartedMsg carries the proxy state channel from Init into Update so it
 // persists across model copies (Init's value-receiver mutations are discarded).
@@ -121,6 +143,8 @@ func (m rootModel) Init() tea.Cmd {
 		m.rt.RefreshTick(0),
 		m.spinner.Tick,
 		m.logs.Init(),
+		m.dashboard.Init(),
+		tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg { return splashDoneMsg{} }),
 	)
 }
 
@@ -144,12 +168,13 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.Width = msg.Width
-		var dCmd, lCmd, docCmd, sCmd tea.Cmd
+		var dCmd, lCmd, docCmd, sCmd, dashCmd tea.Cmd
+		m.dashboard, dashCmd = m.dashboard.Update(msg)
 		m.domains, dCmd = m.domains.Update(msg)
 		m.logs, lCmd = m.logs.Update(msg)
 		m.doctor, docCmd = m.doctor.Update(msg)
 		m.settings, sCmd = m.settings.Update(msg)
-		return m, tea.Batch(dCmd, lCmd, docCmd, sCmd)
+		return m, tea.Batch(dashCmd, dCmd, lCmd, docCmd, sCmd)
 
 	case tabs.LogsTickMsg:
 		var cmd tea.Cmd
@@ -170,9 +195,15 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case RoutesRefreshed:
 		m.busy = false
-		var cmd tea.Cmd
+		var cmd, dashCmd tea.Cmd
 		m.domains, cmd = m.domains.Update(msg)
-		return m, tea.Batch(cmd, m.rt.RefreshTick(time.Second))
+		m.dashboard, dashCmd = m.dashboard.Update(msg)
+		return m, tea.Batch(cmd, dashCmd, m.rt.RefreshTick(time.Second))
+
+	case tabs.DashboardTickMsg:
+		var cmd tea.Cmd
+		m.dashboard, cmd = m.dashboard.Update(msg)
+		return m, cmd
 
 	case errMsg:
 		m.busy = false
@@ -185,6 +216,10 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Since(m.lastErrAt) >= 5*time.Second {
 			m.lastErr = nil
 		}
+		return m, nil
+
+	case splashDoneMsg:
+		m.splash = false
 		return m, nil
 
 	case spinner.TickMsg:
@@ -215,6 +250,10 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.splash {
+			m.splash = false
+			return m, nil
+		}
 		if len(m.modals) > 0 {
 			return m.updateTopModal(msg)
 		}
@@ -244,18 +283,21 @@ func (m rootModel) handleGlobalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.active = (m.active - 1 + tabIndex(len(tabLabels))) % tabIndex(len(tabLabels))
 		return m, nil
 	case key.Matches(k, m.keys.Tab1):
-		m.active = tabDomains
+		m.active = tabDashboard
 		return m, nil
 	case key.Matches(k, m.keys.Tab2):
-		m.active = tabProjects
+		m.active = tabDomains
 		return m, nil
 	case key.Matches(k, m.keys.Tab3):
-		m.active = tabLogs
+		m.active = tabProjects
 		return m, nil
 	case key.Matches(k, m.keys.Tab4):
-		m.active = tabDoctor
+		m.active = tabLogs
 		return m, nil
 	case key.Matches(k, m.keys.Tab5):
+		m.active = tabDoctor
+		return m, nil
+	case key.Matches(k, m.keys.Tab6):
 		m.active = tabSettings
 		return m, nil
 	}
@@ -317,6 +359,13 @@ func (m rootModel) View() string {
 	if width <= 0 {
 		width = 100
 	}
+	if m.splash {
+		h := m.height
+		if h <= 0 {
+			h = 24
+		}
+		return components.Splash(m.th, version.Version, "local HTTPS for dev servers", width, h)
+	}
 
 	pill := components.StatusPill(m.th, components.PillDown, "")
 	if m.proxy.Up {
@@ -326,10 +375,12 @@ func (m rootModel) View() string {
 	}
 
 	header := components.Banner(m.th, version.Version, pill, width)
-	tabBar := components.TabBar(m.th, tabLabels, int(m.active))
+	tabBar := components.TabBarRich(m.th, tabSpecs, int(m.active))
 	rule := m.th.Rule.Render(strings.Repeat("─", width))
 	var body string
 	switch m.active {
+	case tabDashboard:
+		body = m.dashboard.View()
 	case tabDomains:
 		body = m.domains.View()
 	case tabProjects:

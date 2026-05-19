@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/venkatkrishna07/mkdev/internal/tui/styles"
 )
 
@@ -87,6 +88,9 @@ func (l *Logs) refresh() {
 	if len(lines) > keep*2 {
 		lines = lines[len(lines)-keep*2:]
 	}
+	for i, ln := range lines {
+		lines[i] = l.colorize(ln)
+	}
 	l.viewport.SetContent(strings.Join(lines, "\n"))
 	if !l.paused {
 		l.viewport.GotoBottom()
@@ -104,4 +108,50 @@ func (l Logs) View() string {
 
 func logsTickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return LogsTickMsg(t) })
+}
+
+// colorize prepends a 1-cell colored stripe + tints the line based on slog
+// level prefix (level=ERROR/WARN/INFO/DEBUG, case-insensitive).
+func (l *Logs) colorize(line string) string {
+	stripe, levelStyle := l.th.Dim, l.th.Dim
+	switch detectLevel(line) {
+	case levelError:
+		stripe = lipgloss.NewStyle().Foreground(l.th.Bad)
+		levelStyle = stripe.Bold(true)
+	case levelWarn:
+		stripe = lipgloss.NewStyle().Foreground(l.th.Warn)
+		levelStyle = stripe.Bold(true)
+	case levelInfo:
+		stripe = lipgloss.NewStyle().Foreground(l.th.Info)
+		levelStyle = l.th.Base
+	case levelDebug:
+		stripe = lipgloss.NewStyle().Foreground(l.th.Muted)
+		levelStyle = l.th.Dim
+	}
+	return stripe.Render("▎") + " " + levelStyle.Render(line)
+}
+
+type logLevel int
+
+const (
+	levelUnknown logLevel = iota
+	levelDebug
+	levelInfo
+	levelWarn
+	levelError
+)
+
+func detectLevel(line string) logLevel {
+	up := strings.ToUpper(line)
+	switch {
+	case strings.Contains(up, "LEVEL=ERROR"), strings.Contains(up, " ERROR "), strings.Contains(up, "[ERROR]"):
+		return levelError
+	case strings.Contains(up, "LEVEL=WARN"), strings.Contains(up, " WARN "), strings.Contains(up, "[WARN]"):
+		return levelWarn
+	case strings.Contains(up, "LEVEL=INFO"), strings.Contains(up, " INFO "), strings.Contains(up, "[INFO]"):
+		return levelInfo
+	case strings.Contains(up, "LEVEL=DEBUG"), strings.Contains(up, " DEBUG "), strings.Contains(up, "[DEBUG]"):
+		return levelDebug
+	}
+	return levelUnknown
 }

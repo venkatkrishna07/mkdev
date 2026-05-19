@@ -1,33 +1,43 @@
 package tabs
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/venkatkrishna07/mkdev/internal/store"
+	"github.com/venkatkrishna07/mkdev/internal/tui/components"
 	"github.com/venkatkrishna07/mkdev/internal/tui/msg"
 	"github.com/venkatkrishna07/mkdev/internal/tui/styles"
 )
 
-// Domains is the Domains tab.
+// RTTSource resolves the rolling RTT window for a domain. nil = no RTT col.
+type RTTSource func(domain string) []time.Duration
+
 type Domains struct {
 	th     styles.Theme
 	width  int
 	height int
 	table  table.Model
 	routes []store.Route
+	rtt    RTTSource
 }
 
-// NewDomains constructs a Domains tab sized for the given viewport.
 func NewDomains(th styles.Theme, width, height int) Domains {
+	return NewDomainsWithRTT(th, width, height, nil)
+}
+
+func NewDomainsWithRTT(th styles.Theme, width, height int, rtt RTTSource) Domains {
 	cols := []table.Column{
-		{Title: "DOMAIN", Width: 26},
-		{Title: "TARGET", Width: 24},
-		{Title: "STATUS", Width: 10},
+		{Title: "DOMAIN", Width: 24},
+		{Title: "TARGET", Width: 22},
+		{Title: "STATUS", Width: 8},
+		{Title: "RTT", Width: 18},
 		{Title: "SHARE", Width: 6},
-		{Title: "SOURCE", Width: 18},
+		{Title: "SOURCE", Width: 14},
 	}
 	t := table.New(
 		table.WithColumns(cols),
@@ -35,7 +45,7 @@ func NewDomains(th styles.Theme, width, height int) Domains {
 		table.WithHeight(8),
 	)
 	t.SetStyles(tableStyles(th))
-	return Domains{th: th, width: width, height: height, table: t}
+	return Domains{th: th, width: width, height: height, table: t, rtt: rtt}
 }
 
 func tableStyles(th styles.Theme) table.Styles {
@@ -54,10 +64,8 @@ func tableStyles(th styles.Theme) table.Styles {
 	return s
 }
 
-// Title implements tabs.Tab.
 func (d Domains) Title() string { return "Domains" }
 
-// Init implements tea.Model.
 func (d Domains) Init() tea.Cmd { return nil }
 
 func (d Domains) Update(in tea.Msg) (Domains, tea.Cmd) {
@@ -75,8 +83,6 @@ func (d Domains) Update(in tea.Msg) (Domains, tea.Cmd) {
 	return d, cmd
 }
 
-// fitHeight caps the table height to (routes + 1 header), clamped to the
-// remaining viewport budget so the table never wastes vertical space.
 func (d *Domains) fitHeight() {
 	rows := max(len(d.routes), 1)
 	budget := max(d.height-8, 3)
@@ -91,18 +97,47 @@ func (d *Domains) refreshRows() {
 	}
 	rows := make([]table.Row, len(d.routes))
 	for i, r := range d.routes {
-		status := "✓ up"
-		if !r.Enabled {
-			status = "⊘ off"
+		rows[i] = table.Row{
+			r.Domain,
+			r.Target,
+			d.statusCell(r),
+			d.rttCell(r.Domain),
+			shareCell(r.Shared),
+			r.Source,
 		}
-		share := ""
-		if r.Shared {
-			share = "LAN"
-		}
-		rows[i] = table.Row{r.Domain, r.Target, status, share, r.Source}
 	}
 	d.table.SetRows(rows)
 	d.fitHeight()
+}
+
+func (d Domains) statusCell(r store.Route) string {
+	if !r.Enabled {
+		return d.th.PillOff.Render("● off")
+	}
+	if d.rtt != nil && len(d.rtt(r.Domain)) > 0 {
+		return d.th.PillUp.Render("● live")
+	}
+	return d.th.PillUp.Render("● up")
+}
+
+func shareCell(shared bool) string {
+	if shared {
+		return "LAN"
+	}
+	return "—"
+}
+
+func (d Domains) rttCell(domain string) string {
+	if d.rtt == nil {
+		return ""
+	}
+	xs := d.rtt(domain)
+	if len(xs) == 0 {
+		return d.th.Dim.Render("idle")
+	}
+	last := xs[len(xs)-1]
+	bar := components.SparklineDur(d.th, xs, 10)
+	return fmt.Sprintf("%s %s", bar, d.th.Dim.Render(fmt.Sprintf("%dms", last.Milliseconds())))
 }
 
 func (d Domains) View() string {
@@ -114,12 +149,53 @@ func (d Domains) View() string {
 		hint := d.th.Dim.Render("no routes yet — press ") + d.th.FooterKey.Render("a") + d.th.Dim.Render(" to add")
 		return lipgloss.JoinVertical(lipgloss.Left, hint, d.table.View())
 	}
-	rule := d.th.Rule.Render(strings.Repeat("─", w))
-	return lipgloss.JoinVertical(lipgloss.Left, d.table.View(), rule, d.detail())
+	rightW := max(w/3, 28)
+	leftW := w - rightW - 2
+	left := lipgloss.NewStyle().Width(leftW).Render(d.table.View())
+	right := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(d.th.Primary).
+		Padding(0, 1).
+		Width(rightW).
+		Render(d.detailPane())
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 }
 
-// Selected returns the currently selected route or false. Cursor index is
-// clamped to [0, len) so the freshly-loaded state still resolves a selection.
+func (d Domains) detailPane() string {
+	r, ok := d.Selected()
+	if !ok {
+		return d.th.Dim.Render("select a route")
+	}
+	status := "enabled"
+	statusStyle := d.th.PillUp
+	if !r.Enabled {
+		status = "disabled"
+		statusStyle = d.th.PillOff
+	}
+	share := boolWord(r.Shared, "LAN", "local-only")
+	added := r.AddedAt.Format("2006-01-02")
+	rttRow := d.th.Dim.Render("RTT  ") + d.th.Dim.Render("—")
+	if d.rtt != nil {
+		xs := d.rtt(r.Domain)
+		if len(xs) > 0 {
+			last := xs[len(xs)-1].Milliseconds()
+			rttRow = d.th.Dim.Render("RTT  ") + components.SparklineDur(d.th, xs, 16) + " " + d.th.Title.Render(fmt.Sprintf("%dms", last))
+		}
+	}
+	lines := []string{
+		d.th.Title.Render(r.Domain),
+		d.th.Dim.Render("→ ") + r.Target,
+		"",
+		d.th.Dim.Render("status ") + statusStyle.Render(status),
+		d.th.Dim.Render("share  ") + share,
+		d.th.Dim.Render("source ") + r.Source,
+		d.th.Dim.Render("added  ") + added,
+		"",
+		rttRow,
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (d Domains) Selected() (store.Route, bool) {
 	if len(d.routes) == 0 {
 		return store.Route{}, false
@@ -128,7 +204,6 @@ func (d Domains) Selected() (store.Route, bool) {
 	return d.routes[idx], true
 }
 
-// detail renders a single-line inline summary for the selected route.
 func (d Domains) detail() string {
 	r, ok := d.Selected()
 	if !ok {

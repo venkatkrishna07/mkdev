@@ -28,6 +28,7 @@ type Runtime struct {
 	Cfg     config.Config
 	Router  *proxy.Router
 	Issuer  *cert.Issuer
+	Stats   *proxy.Stats
 	mdnsPub *mdnspkg.Publisher
 }
 
@@ -47,7 +48,8 @@ func NewRuntime(ctx context.Context, home string) (*Runtime, error) {
 	}
 	r := proxy.NewRouter()
 	is := cert.NewIssuer(ca, r.Has)
-	return &Runtime{Ctx: ctx, Cancel: cancel, Home: home, Cfg: cfg, Router: r, Issuer: is}, nil
+	st := proxy.NewStats()
+	return &Runtime{Ctx: ctx, Cancel: cancel, Home: home, Cfg: cfg, Router: r, Issuer: is, Stats: st}, nil
 }
 
 // OpenStore returns a transient store handle. Caller MUST close.
@@ -110,7 +112,7 @@ func (rt *Runtime) StartProxy() <-chan ProxyState {
 				}
 			}()
 		}
-		srv := proxy.NewServer(rt.Router, ln)
+		srv := proxy.NewServer(rt.Router, ln, rt.Stats)
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {

@@ -12,13 +12,15 @@ import (
 // Server is a HTTPS reverse proxy backed by a Router.
 type Server struct {
 	router *Router
+	stats  *Stats
 	ln     net.Listener
 	srv    *http.Server
 }
 
 // NewServer wires a server using the given listener (which must already be TLS).
-func NewServer(r *Router, ln net.Listener) *Server {
-	s := &Server{router: r, ln: ln}
+// stats may be nil to disable per-request RTT tracking.
+func NewServer(r *Router, ln net.Listener, stats *Stats) *Server {
+	s := &Server{router: r, stats: stats, ln: ln}
 	s.srv = &http.Server{
 		Handler:           http.HandlerFunc(s.handle),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -57,7 +59,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	target, _ := s.router.Lookup(host)
 	r.Host = target
+	start := time.Now()
 	rp.ServeHTTP(w, r)
+	if s.stats != nil {
+		s.stats.Record(host, time.Since(start))
+	}
 }
 
 // IsLoopbackAddr reports whether remoteAddr resolves to a loopback IP

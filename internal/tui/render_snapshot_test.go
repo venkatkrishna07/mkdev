@@ -31,8 +31,10 @@ func TestSnapshotDenseLayout(t *testing.T) {
 	defer rt.Cancel()
 
 	m := tui.NewRootForTest(rt)
-	m2, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
-	m3, _ := m2.Update(msg.RoutesRefreshed{Routes: []store.Route{
+	m1, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // dismiss splash
+	m2, _ := m1.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m2a, _ := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}) // → Domains
+	m3, _ := m2a.Update(msg.RoutesRefreshed{Routes: []store.Route{
 		{Domain: "foo.local", Target: "localhost:3000", Enabled: true, Source: "ad-hoc", AddedAt: time.Now()},
 		{Domain: "bar.local", Target: "localhost:4000", Enabled: false, Source: "ad-hoc", AddedAt: time.Now()},
 		{Domain: "api.checkout.local", Target: "localhost:4001", Enabled: true, Source: "ad-hoc", AddedAt: time.Now()},
