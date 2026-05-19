@@ -88,17 +88,17 @@ func (rt *Runtime) StartProxy() <-chan ProxyState {
 			ch <- ProxyState{Up: false, Err: err}
 			return
 		}
-		ch <- ProxyState{Up: true, Addr: ln.Addr().String()}
+		ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort)}
 		routes, _ := rt.LoadRoutes()
 		ip, ipErr := mdnspkg.PrimaryLANIPv4()
 		if ipErr != nil {
 			rt.mdnsPub = nil
-			ch <- ProxyState{Up: true, Addr: ln.Addr().String(), Err: fmt.Errorf("mdns: %w", ipErr)}
+			ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort), Err: fmt.Errorf("mdns: %w", ipErr)}
 		} else {
 			rt.mdnsPub = mdnspkg.New(ip)
 			if err := rt.mdnsPub.Set(routes); err != nil {
 				slog.Warn("mdns set failed", "err", err)
-				ch <- ProxyState{Up: true, Addr: ln.Addr().String(), Err: fmt.Errorf("mdns: %w", err)}
+				ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort), Err: fmt.Errorf("mdns: %w", err)}
 			}
 			go func() {
 				defer func() {
