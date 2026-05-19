@@ -28,7 +28,23 @@ That's the whole pitch. Four lines, real HTTPS.
 
 ## Install
 
-No prebuilt binaries yet. Build from source:
+### Homebrew (macOS, Linux)
+
+```sh
+brew install venkatkrishna07/tap/mkdev
+```
+
+### Go
+
+```sh
+go install github.com/venkatkrishna07/mkdev/cmd/mkdev@latest
+```
+
+### Direct download
+
+Pre-built binaries for macOS (Intel + Apple Silicon), Linux (amd64 + arm64), and Windows (amd64) are published on the [Releases page](https://github.com/venkatkrishna07/mkdev/releases). Verify with the published `checksums.txt`.
+
+### From source
 
 ```sh
 git clone https://github.com/venkatkrishna07/mkdev.git
@@ -38,6 +54,13 @@ cp bin/mkdev ~/bin/        # or /usr/local/bin
 ```
 
 Requires **Go 1.25+**.
+
+## First run
+
+```sh
+mkdev install   # one-time root CA trust
+mkdev           # launch TUI
+```
 
 ## Platform support
 

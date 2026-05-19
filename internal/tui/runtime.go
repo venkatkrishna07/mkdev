@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -29,7 +30,8 @@ type Runtime struct {
 	Router  *proxy.Router
 	Issuer  *cert.Issuer
 	Stats   *proxy.Stats
-	mdnsPub *mdnspkg.Publisher
+	Store   *store.Store
+	mdnsPub atomic.Pointer[mdnspkg.Publisher]
 }
 
 // NewRuntime loads config + CA and prepares a Router. It does NOT start the
@@ -46,25 +48,30 @@ func NewRuntime(ctx context.Context, home string) (*Runtime, error) {
 		cancel()
 		return nil, fmt.Errorf("CA not found — run `mkdev install` first: %w", err)
 	}
+	st, err := store.Open(filepath.Join(home, "state.db"))
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("open store: %w", err)
+	}
 	r := proxy.NewRouter()
 	is := cert.NewIssuer(ca, r.Has)
-	st := proxy.NewStats()
-	return &Runtime{Ctx: ctx, Cancel: cancel, Home: home, Cfg: cfg, Router: r, Issuer: is, Stats: st}, nil
+	stats := proxy.NewStats()
+	return &Runtime{Ctx: ctx, Cancel: cancel, Home: home, Cfg: cfg, Router: r, Issuer: is, Stats: stats, Store: st}, nil
 }
 
-// OpenStore returns a transient store handle. Caller MUST close.
-func (rt *Runtime) OpenStore() (*store.Store, error) {
-	return store.Open(filepath.Join(rt.Home, "state.db"))
-}
-
-// LoadRoutes opens the store, lists, closes, and returns.
-func (rt *Runtime) LoadRoutes() ([]store.Route, error) {
-	s, err := rt.OpenStore()
-	if err != nil {
-		return nil, err
+// Close releases long-lived resources held by the runtime (currently the
+// shared bbolt store handle). Safe to call multiple times. Cancel should be
+// called first so background goroutines stop touching the store.
+func (rt *Runtime) Close() error {
+	if rt.Store != nil {
+		return rt.Store.Close()
 	}
-	defer func() { _ = s.Close() }()
-	return s.ListRoutes()
+	return nil
+}
+
+// LoadRoutes returns the current route set from the shared store handle.
+func (rt *Runtime) LoadRoutes() ([]store.Route, error) {
+	return rt.Store.ListRoutes()
 }
 
 // StartProxy binds the TLS listener and serves until Ctx is cancelled.
@@ -92,11 +99,12 @@ func (rt *Runtime) StartProxy() <-chan ProxyState {
 		routes, _ := rt.LoadRoutes()
 		ip, ipErr := mdnspkg.PrimaryLANIPv4()
 		if ipErr != nil {
-			rt.mdnsPub = nil
+			rt.mdnsPub.Store(nil)
 			ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort), Err: fmt.Errorf("mdns: %w", ipErr)}
 		} else {
-			rt.mdnsPub = mdnspkg.New(ip)
-			if err := rt.mdnsPub.Set(routes); err != nil {
+			pub := mdnspkg.New(ip)
+			rt.mdnsPub.Store(pub)
+			if err := pub.Set(routes); err != nil {
 				slog.Warn("mdns set failed", "err", err)
 				ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort), Err: fmt.Errorf("mdns: %w", err)}
 			}
@@ -107,8 +115,10 @@ func (rt *Runtime) StartProxy() <-chan ProxyState {
 					}
 				}()
 				<-rt.Ctx.Done()
-				if err := rt.mdnsPub.Close(); err != nil {
-					slog.Warn("mdns close failed", "err", err)
+				if p := rt.mdnsPub.Load(); p != nil {
+					if err := p.Close(); err != nil {
+						slog.Warn("mdns close failed", "err", err)
+					}
 				}
 			}()
 		}
@@ -137,11 +147,13 @@ func (rt *Runtime) StartProxy() <-chan ProxyState {
 func (rt *Runtime) RefreshTick(delay time.Duration) tea.Cmd {
 	return tea.Tick(delay, func(time.Time) tea.Msg {
 		rs, err := rt.LoadRoutes()
-		rt.Router.Set(rs)
-		rt.Issuer.Prune(rt.Router.Has)
-		if rt.mdnsPub != nil {
-			if mErr := rt.mdnsPub.Set(rs); mErr != nil {
-				slog.Warn("mdns refresh failed", "err", mErr)
+		if err == nil {
+			rt.Router.Set(rs)
+			rt.Issuer.Prune(rt.Router.Has)
+			if p := rt.mdnsPub.Load(); p != nil {
+				if mErr := p.Set(rs); mErr != nil {
+					slog.Warn("mdns refresh failed", "err", mErr)
+				}
 			}
 		}
 		return RoutesRefreshed{Routes: rs, Err: err}

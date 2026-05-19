@@ -31,9 +31,11 @@ func New() *cobra.Command {
 			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})))
 		},
 	}
+	root.SetVersionTemplate("{{.Version}}\n")
 	root.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "enable debug logging")
 	root.PersistentFlags().StringVar(&flagHome, "home", "", "override config dir (default ~/.mkdev)")
 
+	tui := newTUICmd()
 	root.AddCommand(
 		newAddCmd(),
 		newRemoveCmd(),
@@ -42,9 +44,11 @@ func New() *cobra.Command {
 		newInstallCmd(),
 		newUninstallCmd(),
 		newHostsHelperCmd(),
-		newTUICmd(),
+		tui,
+		newVersionCmd(),
+		newCompletionCmd(),
 	)
-	root.RunE = newTUICmd().RunE
+	root.RunE = tui.RunE
 	return root
 }
 

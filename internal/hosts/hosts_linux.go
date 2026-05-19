@@ -70,9 +70,14 @@ func (e *Editor) runSudo(op, host string) error {
 
 // pkexec is the Polkit GUI elevator; ships on every modern desktop Linux.
 // Falls back to sudo if pkexec is absent so headless TUIs over SSH still work.
+// Path is hardcoded (not PATH-resolved) to prevent a user-writable PATH entry
+// shadowing the real binary.
 func (e *Editor) runGUI(op, host string) error {
-	elevator := "pkexec"
-	if _, err := exec.LookPath(elevator); err != nil {
+	const elevator = "/usr/bin/pkexec"
+	if _, err := os.Stat(elevator); err != nil {
+		return e.runSudo(op, host)
+	}
+	if err := safeexec.VerifyBinPath(elevator); err != nil {
 		return e.runSudo(op, host)
 	}
 	cmd := exec.Command(elevator, e.binPath, "hosts-helper", op, host)

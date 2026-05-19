@@ -74,11 +74,19 @@ func CreateCA(dir, commonName string) (*CA, error) {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
 	// CA cert is public; 0644 is intentional so trust store can read.
-	if err := os.WriteFile(filepath.Join(dir, caCertFile), certPEM, 0o644); err != nil { //nolint:gosec
+	certPath := filepath.Join(dir, caCertFile)
+	keyPath := filepath.Join(dir, caKeyFile)
+	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil { //nolint:gosec
 		return nil, fmt.Errorf("cert: write cert: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, caKeyFile), keyPEM, 0o400); err != nil {
+	if err := os.Chmod(certPath, 0o644); err != nil { //nolint:gosec
+		return nil, fmt.Errorf("cert: chmod cert: %w", err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0o400); err != nil {
 		return nil, fmt.Errorf("cert: write key: %w", err)
+	}
+	if err := os.Chmod(keyPath, 0o400); err != nil {
+		return nil, fmt.Errorf("cert: chmod key: %w", err)
 	}
 	return &CA{Cert: parsed, CertPEM: certPEM, Key: key, KeyPEM: keyPEM}, nil
 }

@@ -79,6 +79,11 @@ func atomicWriteHosts(data string) error {
 		cleanup()
 		return err
 	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		cleanup()
+		return err
+	}
 	if err := f.Close(); err != nil {
 		cleanup()
 		return err

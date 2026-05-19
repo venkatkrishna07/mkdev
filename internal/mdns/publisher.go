@@ -2,6 +2,7 @@ package mdns
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -34,6 +35,11 @@ func New(ip net.IP) *Publisher {
 
 // Set diffs the desired route set against the currently published set and
 // adjusts: registers new .local enabled routes, deregisters removed ones.
+//
+// Transactional: all new registrations are attempted into a staging map
+// before any mutation to p.servers. If any registration fails, the staging
+// map is torn down and p.servers is left untouched, so the publisher never
+// ends up in a half-applied state where future ticks skip stuck domains.
 func (p *Publisher) Set(routes []store.Route) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -44,20 +50,36 @@ func (p *Publisher) Set(routes []store.Route) error {
 		}
 		desired[r.Domain] = r
 	}
-	for dom, srv := range p.servers {
-		if _, keep := desired[dom]; !keep {
-			_ = srv.Shutdown() // best-effort; map is replaced regardless
-			delete(p.servers, dom)
-		}
-	}
-	for dom, r := range desired {
+
+	// Phase 1: build everything new before touching p.servers.
+	newSrvs := map[string]*mdns.Server{}
+	var errs []error
+	for dom := range desired {
 		if _, exists := p.servers[dom]; exists {
 			continue
 		}
-		srv, err := registerOne(dom, r.Target, p.ip)
+		srv, err := registerOne(dom, p.ip)
 		if err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("mdns register %s: %w", dom, err))
+			continue
 		}
+		newSrvs[dom] = srv
+	}
+	if len(errs) > 0 {
+		for _, srv := range newSrvs {
+			_ = srv.Shutdown()
+		}
+		return errors.Join(errs...)
+	}
+
+	// Phase 2: commit. Shut down removed, install new.
+	for dom, srv := range p.servers {
+		if _, keep := desired[dom]; !keep {
+			_ = srv.Shutdown()
+			delete(p.servers, dom)
+		}
+	}
+	for dom, srv := range newSrvs {
 		p.servers[dom] = srv
 	}
 	return nil
@@ -77,7 +99,7 @@ func (p *Publisher) Close() error {
 	return firstErr
 }
 
-func registerOne(domain, target string, ip net.IP) (*mdns.Server, error) {
+func registerOne(domain string, ip net.IP) (*mdns.Server, error) {
 	if ip == nil {
 		return nil, errors.New("mdns: nil LAN ip")
 	}
@@ -89,7 +111,7 @@ func registerOne(domain, target string, ip net.IP) (*mdns.Server, error) {
 		host,
 		443,
 		[]net.IP{ip},
-		[]string{"target=" + target, "managed=mkdev"},
+		[]string{"managed=mkdev"},
 	)
 	if err != nil {
 		return nil, err

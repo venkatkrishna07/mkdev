@@ -1,6 +1,10 @@
 # binaries
 /bin/
 /mkdev
+/mkdev.exe
+
+# GoReleaser
+dist/
 
 .editorconfig
 .gitattributes

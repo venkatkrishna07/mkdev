@@ -87,8 +87,11 @@ func (e *Editor) runSudo(op, host string) error {
 // binPath is owner+perm validated by verifyBinPath; we additionally reject any
 // stray `"` or `\` characters to keep the AppleScript literal unambiguous.
 func (e *Editor) runGUI(op, host string) error {
-	if strings.ContainsAny(e.binPath, "\"\\") || strings.ContainsAny(host, "\"\\") {
-		return fmt.Errorf("hosts: refusing to invoke osascript with quoted path/host")
+	if strings.ContainsAny(e.binPath, "\"\\`") || strings.ContainsAny(e.binPath, " \t\n\r") {
+		return fmt.Errorf("hosts: refusing to invoke osascript with unsafe binary path")
+	}
+	if strings.ContainsAny(host, "\"\\` \t\n\r") {
+		return fmt.Errorf("hosts: refusing to invoke osascript with unsafe host argument")
 	}
 	inner := fmt.Sprintf("%s hosts-helper %s %s", e.binPath, op, host)
 	script := fmt.Sprintf("do shell script %q with administrator privileges", inner)

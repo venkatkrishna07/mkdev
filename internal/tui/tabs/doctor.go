@@ -39,13 +39,14 @@ type CheckResult struct {
 type Doctor struct {
 	th      styles.Theme
 	home    string
+	store   *store.Store
 	results []CheckResult
 }
 
 // NewDoctor constructs a Doctor tab against home (e.g. ~/.mkdev) and runs
 // the initial battery of checks.
-func NewDoctor(th styles.Theme, home string) Doctor {
-	d := Doctor{th: th, home: home}
+func NewDoctor(th styles.Theme, home string, st *store.Store) Doctor {
+	d := Doctor{th: th, home: home, store: st}
 	d.runChecks()
 	return d
 }
@@ -157,12 +158,10 @@ func (d Doctor) checkLANIP() CheckResult {
 }
 
 func (d Doctor) checkSharedRoutes() CheckResult {
-	s, err := store.Open(filepath.Join(d.home, "state.db"))
-	if err != nil {
-		return CheckResult{"shared routes", CheckWarn, err.Error()}
+	if d.store == nil {
+		return CheckResult{"shared routes", CheckWarn, "store handle unavailable"}
 	}
-	defer func() { _ = s.Close() }()
-	routes, err := s.ListRoutes()
+	routes, err := d.store.ListRoutes()
 	if err != nil {
 		return CheckResult{"shared routes", CheckWarn, err.Error()}
 	}

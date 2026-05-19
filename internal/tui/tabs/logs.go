@@ -2,6 +2,7 @@ package tabs
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -76,10 +77,21 @@ func (l *Logs) refresh() {
 		return
 	}
 	defer func() { _ = f.Close() }()
+	const tailBytes = 64 * 1024
+	if st, err := f.Stat(); err == nil && st.Size() > tailBytes {
+		if _, err := f.Seek(-tailBytes, io.SeekEnd); err != nil {
+			l.viewport.SetContent(l.th.Dim.Render("log seek failed: " + err.Error()))
+			return
+		}
+	}
 	var lines []string
 	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
 		lines = append(lines, sc.Text())
+	}
+	if len(lines) > 0 && len(lines[0]) > 0 {
+		lines = lines[1:]
 	}
 	keep := l.viewport.Height
 	if keep < 1 {

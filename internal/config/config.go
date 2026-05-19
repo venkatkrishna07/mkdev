@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -44,6 +45,9 @@ func Load(path string) (Config, error) {
 	}
 	if c.ProxyPort < 1 || c.ProxyPort > 65535 {
 		return Config{}, fmt.Errorf("config: proxy_port out of range: %d", c.ProxyPort)
+	}
+	if !strings.HasPrefix(c.TLD, ".") || len(c.TLD) < 2 {
+		return Config{}, fmt.Errorf("config: tld must start with '.' and be non-empty (got %q)", c.TLD)
 	}
 	return c, nil
 }

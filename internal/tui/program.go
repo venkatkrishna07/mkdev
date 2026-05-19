@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/venkatkrishna07/mkdev/internal/browser"
 	"github.com/venkatkrishna07/mkdev/internal/tui/components"
 	"github.com/venkatkrishna07/mkdev/internal/tui/modals"
 	"github.com/venkatkrishna07/mkdev/internal/tui/styles"
@@ -48,11 +48,15 @@ var tabSpecs = []components.Tab{
 
 // Run launches the TUI bound to rt. It blocks until the user quits, then
 // cancels the runtime context so the proxy goroutine exits cleanly.
+//
+// LIFO defer order: Cancel signals goroutines to wind down first, then
+// Close releases the bbolt file lock. Both fire even if p.Run panics.
 func Run(rt *Runtime) error {
+	defer func() { _ = rt.Close() }()
+	defer rt.Cancel()
 	m := newRootModel(rt)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
-	rt.Cancel()
 	return err
 }
 
@@ -114,7 +118,7 @@ func newRootModel(rt *Runtime) rootModel {
 		dashboard: tabs.NewDashboard(th, dashSrc),
 		domains:   tabs.NewDomainsWithRTT(th, 100, 24, rt.Stats.Snapshot),
 		logs:      tabs.NewLogs(th, logPath),
-		doctor:    tabs.NewDoctor(th, rt.Home),
+		doctor:    tabs.NewDoctor(th, rt.Home, rt.Store),
 		settings:  tabs.NewSettings(th, rt.Home),
 		binPath:   bp,
 		keys:      DefaultKeyMap,
@@ -347,7 +351,7 @@ func openInBrowser(domain string, port int) tea.Cmd {
 		if port != 443 {
 			url = fmt.Sprintf("%s:%d", url, port)
 		}
-		if err := exec.Command("open", url).Run(); err != nil { //nolint:gosec // url is built from validated domain + numeric port
+		if err := browser.Open(url); err != nil {
 			return errMsg(fmt.Errorf("open browser: %w", err))
 		}
 		return nil

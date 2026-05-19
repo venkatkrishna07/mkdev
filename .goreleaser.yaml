@@ -1,0 +1,97 @@
+version: 2
+project_name: mkdev
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: mkdev
+    main: ./cmd/mkdev
+    binary: mkdev
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/venkatkrishna07/mkdev/internal/version.Version={{.Version}}
+      - -X github.com/venkatkrishna07/mkdev/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/venkatkrishna07/mkdev/internal/version.Date={{.Date}}
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE*
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+signs:
+  - id: cosign-checksums
+    cmd: cosign
+    artifacts: checksum
+    signature: '${artifact}.sig'
+    certificate: '${artifact}.pem'
+    args:
+      - sign-blob
+      - '--output-signature=${signature}'
+      - '--output-certificate=${certificate}'
+      - '--yes'
+      - '${artifact}'
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+      - '^ci:'
+      - 'Merge pull request'
+      - 'Merge branch'
+
+release:
+  draft: false
+  prerelease: auto
+  github:
+    owner: venkatkrishna07
+    name: mkdev
+
+brews:
+  - name: mkdev
+    repository:
+      owner: venkatkrishna07
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/venkatkrishna07/mkdev
+    description: "Trusted HTTPS dev server with LAN broadcast via mDNS"
+    license: MIT
+    test: |
+      system "#{bin}/mkdev", "--version"
+    install: |
+      bin.install "mkdev"
+      generate_completions_from_executable(bin/"mkdev", "completion")

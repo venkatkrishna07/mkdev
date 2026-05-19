@@ -17,11 +17,7 @@ func (m rootModel) commitAdd(p modals.AddPayload) tea.Cmd {
 		if !hosts.ValidHostname(p.Domain) {
 			return errMsg(fmt.Errorf("invalid domain %q", p.Domain))
 		}
-		s, err := m.rt.OpenStore()
-		if err != nil {
-			return errMsg(err)
-		}
-		defer func() { _ = s.Close() }()
+		s := m.rt.Store
 		if _, err := s.GetRoute(p.Domain); err == nil {
 			return errMsg(fmt.Errorf("route exists: %s", p.Domain))
 		} else if !errors.Is(err, store.ErrNotFound) {
@@ -58,11 +54,7 @@ func (m rootModel) commitAdd(p modals.AddPayload) tea.Cmd {
 
 func (m rootModel) commitEdit(p modals.EditPayload) tea.Cmd {
 	return func() tea.Msg {
-		s, err := m.rt.OpenStore()
-		if err != nil {
-			return errMsg(err)
-		}
-		defer func() { _ = s.Close() }()
+		s := m.rt.Store
 		cur, err := s.GetRoute(p.Domain)
 		if err != nil {
 			return errMsg(err)
@@ -82,11 +74,7 @@ func (m rootModel) commitEdit(p modals.EditPayload) tea.Cmd {
 
 func (m rootModel) commitDelete(r store.Route) tea.Cmd {
 	return func() tea.Msg {
-		s, err := m.rt.OpenStore()
-		if err != nil {
-			return errMsg(err)
-		}
-		defer func() { _ = s.Close() }()
+		s := m.rt.Store
 		editor := hosts.NewGUIEditor(m.binPath)
 		if err := editor.Remove(r.Domain); err != nil {
 			return errMsg(fmt.Errorf("hosts: %w", err))
@@ -109,11 +97,7 @@ func (m rootModel) commitDelete(r store.Route) tea.Cmd {
 
 func (m rootModel) toggleRoute(r store.Route) tea.Cmd {
 	return func() tea.Msg {
-		s, err := m.rt.OpenStore()
-		if err != nil {
-			return errMsg(err)
-		}
-		defer func() { _ = s.Close() }()
+		s := m.rt.Store
 		r.Enabled = !r.Enabled
 		if err := s.PutRoute(r); err != nil {
 			return errMsg(err)
@@ -129,11 +113,7 @@ func (m rootModel) toggleRoute(r store.Route) tea.Cmd {
 
 func (m rootModel) toggleShare(r store.Route) tea.Cmd {
 	return func() tea.Msg {
-		s, err := m.rt.OpenStore()
-		if err != nil {
-			return errMsg(err)
-		}
-		defer func() { _ = s.Close() }()
+		s := m.rt.Store
 		r.Shared = !r.Shared
 		if err := s.PutRoute(r); err != nil {
 			return errMsg(err)

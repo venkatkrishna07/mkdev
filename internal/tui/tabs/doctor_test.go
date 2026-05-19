@@ -9,7 +9,7 @@ import (
 )
 
 func TestDoctorRunsChecks(t *testing.T) {
-	d := tabs.NewDoctor(styles.NewTheme(), t.TempDir())
+	d := tabs.NewDoctor(styles.NewTheme(), t.TempDir(), nil)
 	out := d.View()
 	require.Contains(t, out, "state directory")
 	require.Contains(t, out, "config.toml")

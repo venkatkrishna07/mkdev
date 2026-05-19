@@ -23,6 +23,7 @@ func TestNewRuntimeRefresh(t *testing.T) {
 
 	rt, err := tui.NewRuntime(context.Background(), home)
 	require.NoError(t, err)
+	defer func() { _ = rt.Close() }()
 	defer rt.Cancel()
 
 	rs, err := rt.LoadRoutes()
