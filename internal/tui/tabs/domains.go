@@ -14,7 +14,7 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/tui/styles"
 )
 
-// RTTSource resolves the rolling RTT window for a domain. nil = no RTT col.
+// RTTSource resolves the rolling RTT window for a domain. nil = no live RTT.
 type RTTSource func(domain string) []time.Duration
 
 type Domains struct {
@@ -47,12 +47,8 @@ func tableStyles(th styles.Theme) table.Styles {
 	s.Header = s.Header.
 		Bold(true).
 		Foreground(th.Primary).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(th.Muted).
-		BorderTop(false).
-		BorderLeft(false).
-		BorderRight(false).
-		BorderBottom(true).
+		BorderStyle(lipgloss.HiddenBorder()).
+		BorderBottom(false).
 		Padding(0, 1)
 	s.Selected = s.Selected.
 		Bold(true).
@@ -64,7 +60,6 @@ func tableStyles(th styles.Theme) table.Styles {
 
 const (
 	domainsStatusW    = 12
-	domainsRTTW       = 14
 	domainsSourceW    = 12
 	domainsDetailW    = 32
 	domainsDetailMinW = 100
@@ -82,7 +77,7 @@ func (d *Domains) tableWidth() int {
 }
 
 func (d Domains) layoutCols(tableW int) []table.Column {
-	fixed := domainsStatusW + domainsRTTW + domainsSourceW
+	fixed := domainsStatusW + domainsSourceW
 	rem := tableW - fixed - 8 // padding budget across cols
 	if rem < 24 {
 		rem = 24
@@ -93,7 +88,6 @@ func (d Domains) layoutCols(tableW int) []table.Column {
 		{Title: "DOMAIN", Width: domW},
 		{Title: "TARGET", Width: tgtW},
 		{Title: "STATUS", Width: domainsStatusW},
-		{Title: "RTT", Width: domainsRTTW},
 		{Title: "SOURCE", Width: domainsSourceW},
 	}
 }
@@ -136,7 +130,6 @@ func (d *Domains) refreshRows() {
 			r.Domain,
 			r.Target,
 			d.statusCell(r),
-			d.rttCell(r.Domain),
 			r.Source,
 		}
 	}
@@ -158,19 +151,6 @@ func (d Domains) statusCell(r store.Route) string {
 		return pill + " " + d.th.Dim.Render("LAN")
 	}
 	return pill
-}
-
-func (d Domains) rttCell(domain string) string {
-	if d.rtt == nil {
-		return ""
-	}
-	xs := d.rtt(domain)
-	if len(xs) == 0 {
-		return d.th.Dim.Render("idle")
-	}
-	last := xs[len(xs)-1]
-	bar := components.SparklineDur(d.th, xs, 10)
-	return fmt.Sprintf("%s %s", bar, d.th.Dim.Render(fmt.Sprintf("%dms", last.Milliseconds())))
 }
 
 func (d Domains) View() string {
