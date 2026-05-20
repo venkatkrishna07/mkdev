@@ -29,6 +29,7 @@ var (
 	systemTrustCmd []string
 )
 
+// ErrNoSystemTrust is returned when no supported Linux trust store was detected.
 var ErrNoSystemTrust = errors.New("trust: no supported system trust store on this Linux distro")
 
 func init() {
@@ -61,6 +62,8 @@ func pathExists(p string) bool {
 	return err == nil
 }
 
+// Install copies the certificate at certPath into the detected system trust
+// store directory and runs the distro-specific update command. Requires sudo.
 func Install(certPath string) error {
 	if systemTrustCmd == nil {
 		return ErrNoSystemTrust
@@ -72,24 +75,26 @@ func Install(certPath string) error {
 	if err != nil {
 		return fmt.Errorf("trust: abs path: %w", err)
 	}
-	certPEM, err := os.ReadFile(abs)
+	certPEM, err := os.ReadFile(abs) //nolint:gosec
 	if err != nil {
 		return fmt.Errorf("trust: read cert: %w", err)
 	}
 
-	tee := exec.Command("sudo", "tee", anchorPath())
+	tee := exec.Command("sudo", "tee", anchorPath()) //nolint:gosec
 	tee.Stdin = strings.NewReader(string(certPEM))
 	if out, err := tee.CombinedOutput(); err != nil {
 		return fmt.Errorf("trust: tee %s: %w: %s", anchorPath(), err, strings.TrimSpace(string(out)))
 	}
 
-	upd := exec.Command("sudo", systemTrustCmd...)
+	upd := exec.Command("sudo", systemTrustCmd...) //nolint:gosec
 	if out, err := upd.CombinedOutput(); err != nil {
 		return fmt.Errorf("trust: %s: %w: %s", strings.Join(systemTrustCmd, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
+// Uninstall removes the mkdev anchor cert from the system trust store and
+// re-runs the distro-specific update command. Requires sudo.
 func Uninstall(_ string) error {
 	if systemTrustCmd == nil {
 		return ErrNoSystemTrust
@@ -100,17 +105,19 @@ func Uninstall(_ string) error {
 	if !pathExists(anchorPath()) {
 		return nil
 	}
-	rm := exec.Command("sudo", "rm", "-f", anchorPath())
+	rm := exec.Command("sudo", "rm", "-f", anchorPath()) //nolint:gosec
 	if out, err := rm.CombinedOutput(); err != nil {
 		return fmt.Errorf("trust: rm %s: %w: %s", anchorPath(), err, strings.TrimSpace(string(out)))
 	}
-	upd := exec.Command("sudo", systemTrustCmd...)
+	upd := exec.Command("sudo", systemTrustCmd...) //nolint:gosec
 	if out, err := upd.CombinedOutput(); err != nil {
 		return fmt.Errorf("trust: %s: %w: %s", strings.Join(systemTrustCmd, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
+// ListMkdevCerts returns the SHA-1 fingerprint(s) of any mkdev anchor cert
+// currently installed in the system trust store. Empty slice if not installed.
 func ListMkdevCerts() ([]string, error) {
 	if systemTrustDir == "" {
 		return nil, nil
@@ -130,6 +137,8 @@ func ListMkdevCerts() ([]string, error) {
 	return []string{strings.ToUpper(hex.EncodeToString(sum[:]))}, nil
 }
 
+// IsInstalled reports whether c matches the SHA-1 fingerprint of the mkdev
+// anchor currently in the system trust store.
 func IsInstalled(c *x509.Certificate) (bool, error) {
 	if c == nil {
 		return false, errors.New("trust: nil cert")

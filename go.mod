@@ -2,6 +2,8 @@ module github.com/venkatkrishna07/mkdev
 
 go 1.25.0
 
+toolchain go1.26.3
+
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/bubbles v1.0.0
