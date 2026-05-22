@@ -1,11 +1,13 @@
 package tabs
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/venkatkrishna07/mkdev/internal/proxy/prober"
 	"github.com/venkatkrishna07/mkdev/internal/store"
 	"github.com/venkatkrishna07/mkdev/internal/tui/msg"
 	"github.com/venkatkrishna07/mkdev/internal/tui/styles"
@@ -13,6 +15,13 @@ import (
 
 // RTTSource resolves the rolling RTT window for a domain. nil = no live RTT.
 type RTTSource func(domain string) []time.Duration
+
+// HealthSource resolves the latest probe state for a route domain.
+// nil = no live health (falls back to Enabled-only signal).
+type HealthSource func(domain string) prober.HealthState
+
+// LANSource resolves the current mDNS advertise snapshot. nil = no advertise info.
+type LANSource func() LANState
 
 // Domains is the routes table tab.
 type Domains struct {
@@ -22,28 +31,34 @@ type Domains struct {
 	table  table.Model
 	routes []store.Route
 	rtt    RTTSource
+	health HealthSource
+	lan    LANSource
 }
 
 // Column widths are the content area. bubbles/table renders each cell with
 // Cell.Padding(0,1), so each column occupies Width+2 visible columns.
 const (
-	domainsStatusW = 8
+	domainsStatusW = 20
 	domainsShareW  = 5
-	domainsSourceW = 10
 	domainsAddedW  = 10
-	domainsNCols   = 6
+	domainsNCols   = 5
 	domainsCellPad = 2 // Cell.Padding(0,1) → 1 space each side
-	domainsMinW    = 80
+	domainsMinW    = 84
 )
 
-// NewDomains constructs a Domains tab without a live RTT source.
+// NewDomains constructs a Domains tab without live RTT or health sources.
 func NewDomains(th styles.Theme, width, height int) Domains {
-	return NewDomainsWithRTT(th, width, height, nil)
+	return NewDomainsWithSources(th, width, height, nil, nil, nil)
 }
 
 // NewDomainsWithRTT constructs a Domains tab that surfaces live RTT samples.
 func NewDomainsWithRTT(th styles.Theme, width, height int, rtt RTTSource) Domains {
-	d := Domains{th: th, width: width, height: height, rtt: rtt}
+	return NewDomainsWithSources(th, width, height, rtt, nil, nil)
+}
+
+// NewDomainsWithSources constructs a Domains tab with RTT, Health, and LAN sources.
+func NewDomainsWithSources(th styles.Theme, width, height int, rtt RTTSource, health HealthSource, lan LANSource) Domains {
+	d := Domains{th: th, width: width, height: height, rtt: rtt, health: health, lan: lan}
 	cols := d.layoutCols()
 	t := table.New(
 		table.WithColumns(cols),
@@ -88,7 +103,7 @@ func (d Domains) layoutCols() []table.Column {
 	if w < domainsMinW {
 		w = domainsMinW
 	}
-	fixed := domainsStatusW + domainsShareW + domainsSourceW + domainsAddedW
+	fixed := domainsStatusW + domainsShareW + domainsAddedW
 	padTotal := domainsCellPad * domainsNCols
 	rem := w - fixed - padTotal
 	if rem < 24 {
@@ -101,7 +116,6 @@ func (d Domains) layoutCols() []table.Column {
 		{Title: "TARGET", Width: tgtW},
 		{Title: "STATUS", Width: domainsStatusW},
 		{Title: "SHARE", Width: domainsShareW},
-		{Title: "SOURCE", Width: domainsSourceW},
 		{Title: "ADDED", Width: domainsAddedW},
 	}
 }
@@ -150,7 +164,6 @@ func (d *Domains) refreshRows() {
 			r.Target,
 			d.statusCell(r),
 			shareCell(r.Shared),
-			r.Source,
 			r.AddedAt.Format("2006-01-02"),
 		}
 	}
@@ -163,30 +176,46 @@ func (d *Domains) refreshRows() {
 // escape bytes toward visible width and mangles the output. Color belongs to
 // the row Selected style only.
 func (d Domains) statusCell(r store.Route) string {
-	switch {
-	case !r.Enabled:
-		return "● off"
-	case d.rtt != nil && len(d.rtt(r.Domain)) > 0:
-		return "● live"
-	default:
-		return "● up"
+	if !r.Enabled {
+		return "⊘ off"
 	}
+	if d.health != nil {
+		h := d.health(strings.ToLower(r.Domain))
+		switch h.Status {
+		case prober.StatusUp:
+			return "● up"
+		case prober.StatusDown:
+			if h.LastErr == "" {
+				return "✗ down"
+			}
+			return truncate("✗ down: "+h.LastErr, domainsStatusW)
+		}
+	}
+	if d.rtt != nil && len(d.rtt(r.Domain)) > 0 {
+		return "● live"
+	}
+	return "● up"
 }
 
 func shareCell(shared bool) string {
 	if shared {
 		return "LAN"
 	}
-	return "—"
+	return "local"
 }
 
-// View renders the table, or an empty-state hint when no routes exist.
+// View renders the table plus a selected-route detail panel.
+// Empty state (no routes) preserves the existing "no routes yet" hint.
 func (d Domains) View() string {
 	if len(d.routes) == 0 {
 		hint := d.th.Dim.Render("no routes yet — press ") + d.th.FooterKey.Render("a") + d.th.Dim.Render(" to add")
 		return lipgloss.JoinVertical(lipgloss.Left, hint, d.table.View())
 	}
-	return d.table.View()
+	return lipgloss.JoinVertical(lipgloss.Left,
+		d.table.View(),
+		"",
+		d.detailPanel(),
+	)
 }
 
 // Selected returns the route under the table cursor, if any.
@@ -196,4 +225,85 @@ func (d Domains) Selected() (store.Route, bool) {
 	}
 	idx := min(max(d.table.Cursor(), 0), len(d.routes)-1)
 	return d.routes[idx], true
+}
+
+// detailPanel renders a bordered block beneath the table with full info for
+// the currently selected route. Returns "" when no route is selected.
+func (d Domains) detailPanel() string {
+	r, ok := d.Selected()
+	if !ok {
+		return ""
+	}
+
+	w := d.width
+	if w <= 0 {
+		w = 100
+	}
+
+	title := d.th.Title.Render(r.Domain)
+	target := d.th.Dim.Render("Target  ") + r.Target
+	scope := d.th.Dim.Render("Scope   ") + d.scopeValue(r)
+	health, errLine := d.healthLines(r)
+	url := d.th.Dim.Render("URL     ") + "https://" + r.Domain + "/"
+
+	rows := []string{title, target, scope, health}
+	if errLine != "" {
+		rows = append(rows, errLine)
+	}
+	rows = append(rows, url)
+
+	return boxed(d.th, strings.Join(rows, "\n"), w)
+}
+
+func (d Domains) scopeValue(r store.Route) string {
+	if !r.Shared {
+		return "local — not advertised on LAN"
+	}
+	ip := ""
+	if d.lan != nil {
+		if st := d.lan(); st.Advertising {
+			ip = st.IP
+		}
+	}
+	if ip == "" {
+		return "LAN"
+	}
+	return "LAN · " + ip
+}
+
+// healthLines returns the Health row and (optionally) a follow-up error row
+// for the detail panel.
+func (d Domains) healthLines(r store.Route) (string, string) {
+	pill := d.healthPill(r)
+	if d.health == nil {
+		return d.th.Dim.Render("Health  ") + pill, ""
+	}
+	h := d.health(strings.ToLower(r.Domain))
+	line := d.th.Dim.Render("Health  ") + pill
+	if !h.LastProbe.IsZero() {
+		line += " · last probe " + humanDuration(time.Since(h.LastProbe))
+	}
+	if h.Status == prober.StatusDown && h.LastErr != "" {
+		return line, d.th.Dim.Render("error   ") + h.LastErr
+	}
+	return line, ""
+}
+
+// healthPill returns the plain-text pill label matching statusCell semantics
+// for the panel (no error appended; the panel renders errors on a separate row).
+func (d Domains) healthPill(r store.Route) string {
+	if !r.Enabled {
+		return "⊘ off"
+	}
+	if d.health == nil {
+		return "● up"
+	}
+	switch d.health(strings.ToLower(r.Domain)).Status {
+	case prober.StatusUp:
+		return "● up"
+	case prober.StatusDown:
+		return "✗ down"
+	default:
+		return "⊘ off"
+	}
 }

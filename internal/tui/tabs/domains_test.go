@@ -17,7 +17,9 @@ func TestDomainsViewHeader(t *testing.T) {
 	require.Contains(t, out, "DOMAIN")
 	require.Contains(t, out, "TARGET")
 	require.Contains(t, out, "STATUS")
-	require.Contains(t, out, "SOURCE")
+	require.Contains(t, out, "SHARE")
+	require.Contains(t, out, "ADDED")
+	require.NotContains(t, out, "SOURCE")
 }
 
 func TestDomainsRoutesRefreshedPopulatesTable(t *testing.T) {

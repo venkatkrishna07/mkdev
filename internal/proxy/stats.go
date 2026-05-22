@@ -22,6 +22,8 @@ type Stats struct {
 	rpsMu  sync.Mutex
 	rpsBuf [rpsWindowSec]uint32
 	rpsTs  int64 // last bucket epoch second written
+
+	lastReq map[string]time.Time
 }
 
 type ring struct {
@@ -33,7 +35,10 @@ type ring struct {
 
 // NewStats returns an empty Stats collector.
 func NewStats() *Stats {
-	return &Stats{buf: make(map[string]*ring)}
+	return &Stats{
+		buf:     make(map[string]*ring),
+		lastReq: make(map[string]time.Time),
+	}
 }
 
 // Record adds one RTT sample for domain and bumps the rolling RPS window.
@@ -56,6 +61,10 @@ func (s *Stats) Record(domain string, d time.Duration) {
 	s.mu.Unlock()
 
 	s.bumpRPS()
+
+	s.rpsMu.Lock()
+	s.lastReq[domain] = time.Now()
+	s.rpsMu.Unlock()
 }
 
 func (s *Stats) bumpRPS() {
@@ -138,6 +147,15 @@ func (s *Stats) RPS() []float64 {
 		out[i] = float64(s.rpsBuf[bucketTs%rpsWindowSec])
 	}
 	return out
+}
+
+// LastSeen returns the time the most recent request for host was recorded.
+// Returns a zero-value time.Time when host has never received a request.
+func (s *Stats) LastSeen(host string) time.Time {
+	host = strings.ToLower(host)
+	s.rpsMu.Lock()
+	defer s.rpsMu.Unlock()
+	return s.lastReq[host]
 }
 
 // Domains returns the set of domains that have recorded at least one request.

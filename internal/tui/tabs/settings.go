@@ -66,10 +66,10 @@ func (s *Settings) focusOn(i int) {
 func (s Settings) Update(msg tea.Msg) (Settings, tea.Cmd) {
 	if k, ok := msg.(tea.KeyMsg); ok {
 		switch k.Type {
-		case tea.KeyTab:
+		case tea.KeyDown:
 			s.focusOn((s.focus + 1) % numSettingsFields)
 			return s, textinput.Blink
-		case tea.KeyShiftTab:
+		case tea.KeyUp:
 			s.focusOn((s.focus - 1 + numSettingsFields) % numSettingsFields)
 			return s, textinput.Blink
 		case tea.KeyEnter:
@@ -124,6 +124,6 @@ func (s Settings) View() string {
 	if s.status != "" {
 		out.WriteString(s.th.Dim.Render(s.status) + "\n")
 	}
-	out.WriteString(s.th.Dim.Render("tab cycle - ctrl+s save - ctrl+r reload"))
+	out.WriteString(s.th.Dim.Render("↑↓ field · ↵ next · ⌃s save · ⌃r reset"))
 	return out.String()
 }

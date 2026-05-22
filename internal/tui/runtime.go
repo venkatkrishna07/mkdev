@@ -18,6 +18,7 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/config"
 	mdnspkg "github.com/venkatkrishna07/mkdev/internal/mdns"
 	"github.com/venkatkrishna07/mkdev/internal/proxy"
+	"github.com/venkatkrishna07/mkdev/internal/proxy/prober"
 	"github.com/venkatkrishna07/mkdev/internal/store"
 )
 
@@ -31,7 +32,15 @@ type Runtime struct {
 	Issuer  *cert.Issuer
 	Stats   *proxy.Stats
 	Store   *store.Store
+	Prober  *prober.Prober
 	mdnsPub atomic.Pointer[mdnspkg.Publisher]
+}
+
+// LANState is a snapshot of LAN-share visibility for dashboard rendering.
+type LANState struct {
+	IP          string
+	Advertising bool
+	SharedCount int
 }
 
 // NewRuntime loads config + CA and prepares a Router. It does NOT start the
@@ -56,7 +65,8 @@ func NewRuntime(ctx context.Context, home string) (*Runtime, error) {
 	r := proxy.NewRouter()
 	is := cert.NewIssuer(ca, r.Has)
 	stats := proxy.NewStats()
-	return &Runtime{Ctx: ctx, Cancel: cancel, Home: home, Cfg: cfg, Router: r, Issuer: is, Stats: stats, Store: st}, nil
+	pr := prober.New(st.ListRoutes, 2*time.Second, 500*time.Millisecond)
+	return &Runtime{Ctx: ctx, Cancel: cancel, Home: home, Cfg: cfg, Router: r, Issuer: is, Stats: stats, Store: st, Prober: pr}, nil
 }
 
 // Close releases long-lived resources held by the runtime (currently the
@@ -96,6 +106,14 @@ func (rt *Runtime) StartProxy() <-chan ProxyState {
 			return
 		}
 		ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort)}
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("prober goroutine panic", "panic", r)
+				}
+			}()
+			rt.Prober.Run(rt.Ctx)
+		}()
 		routes, _ := rt.LoadRoutes()
 		ip, ipErr := mdnspkg.PrimaryLANIPv4()
 		if ipErr != nil {
@@ -158,4 +176,23 @@ func (rt *Runtime) RefreshTick(delay time.Duration) tea.Cmd {
 		}
 		return RoutesRefreshed{Routes: rs, Err: err}
 	})
+}
+
+// LANState returns a snapshot of mDNS advertising state and the number of
+// routes currently shared on the LAN.
+func (rt *Runtime) LANState() LANState {
+	var st LANState
+	if p := rt.mdnsPub.Load(); p != nil {
+		st.Advertising = true
+		if ip, err := mdnspkg.PrimaryLANIPv4(); err == nil {
+			st.IP = ip.String()
+		}
+	}
+	routes, _ := rt.Store.ListRoutes()
+	for _, r := range routes {
+		if r.Enabled && r.Shared {
+			st.SharedCount++
+		}
+	}
+	return st
 }
