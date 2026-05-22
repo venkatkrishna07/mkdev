@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/venkatkrishna07/mkdev/internal/store"
 	"github.com/venkatkrishna07/mkdev/internal/version"
 )
 
@@ -55,6 +58,11 @@ func New() *cobra.Command {
 // Execute runs the root command and returns its exit code.
 func Execute() int {
 	if err := New().Execute(); err != nil {
+		if errors.Is(err, store.ErrLocked) {
+			fmt.Fprintln(os.Stderr, "mkdev: another instance is already running (state.db is locked).")
+			fmt.Fprintln(os.Stderr, "       quit the running instance and try again.")
+			return 1
+		}
 		slog.Error("command failed", "err", err)
 		return 1
 	}

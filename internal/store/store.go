@@ -8,12 +8,16 @@ import (
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 )
 
 var bucketRoutes = []byte("routes")
 
 // ErrNotFound is returned when a record does not exist.
 var ErrNotFound = errors.New("store: not found")
+
+// ErrLocked is returned when the database file is held by another process.
+var ErrLocked = errors.New("store: database locked by another process")
 
 // Store wraps a bbolt database.
 type Store struct {
@@ -27,6 +31,9 @@ func Open(path string) (*Store, error) {
 	}
 	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 2 * time.Second})
 	if err != nil {
+		if errors.Is(err, bolterrors.ErrTimeout) {
+			return nil, fmt.Errorf("%w: %s", ErrLocked, path)
+		}
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
 	err = db.Update(func(tx *bolt.Tx) error {

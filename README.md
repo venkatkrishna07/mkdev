@@ -71,7 +71,7 @@ xattr -d com.apple.quarantine ./mkdev
 ```sh
 git clone https://github.com/venkatkrishna07/mkdev.git
 cd mkdev
-make build
+task build
 cp bin/mkdev ~/bin/        # or /usr/local/bin
 ```
 

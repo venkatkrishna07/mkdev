@@ -1,0 +1,61 @@
+version: '3'
+
+vars:
+  BIN: bin/mkdev
+  PKG: ./...
+  GOFLAGS: -trimpath
+  VERSION:
+    sh: git describe --tags --dirty --always 2>/dev/null || echo "dev"
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo "none"
+  DATE:
+    sh: date -u +%Y-%m-%dT%H:%M:%SZ
+  LDFLAGS: >-
+    -X github.com/venkatkrishna07/mkdev/internal/version.Version={{.VERSION}}
+    -X github.com/venkatkrishna07/mkdev/internal/version.Commit={{.COMMIT}}
+    -X github.com/venkatkrishna07/mkdev/internal/version.Date={{.DATE}}
+
+tasks:
+  default:
+    desc: List tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build mkdev binary
+    cmds:
+      - mkdir -p bin
+      - go build {{.GOFLAGS}} -ldflags "{{.LDFLAGS}}" -o {{.BIN}} ./cmd/mkdev
+
+  test:
+    desc: Run tests with race detector
+    cmds:
+      - go test {{.GOFLAGS}} -race -count=1 -timeout=60s {{.PKG}}
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run
+
+  run:
+    desc: Build and run mkdev
+    deps: [build]
+    cmds:
+      - "{{.BIN}}"
+
+  coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test {{.GOFLAGS}} -race -count=1 -coverprofile=coverage.txt -covermode=atomic {{.PKG}}
+      - go tool cover -func=coverage.txt | tail -1
+
+  tidy:
+    desc: Tidy modules and format code
+    cmds:
+      - go mod tidy
+      - gofmt -w .
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf bin coverage.txt
