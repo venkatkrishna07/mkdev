@@ -17,10 +17,13 @@ import (
 // Status is the health verdict for a single route's upstream.
 type Status int
 
+// Status values reported by Health / Snapshot.
 const (
-	// StatusOff is the zero value and also the recorded status for disabled routes.
+	// StatusOff is the zero value and the recorded status for disabled routes.
 	StatusOff Status = iota
+	// StatusUp means the most recent dial succeeded.
 	StatusUp
+	// StatusDown means the most recent dial failed; LastErr carries the reason.
 	StatusDown
 )
 
