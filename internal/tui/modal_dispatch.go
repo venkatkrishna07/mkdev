@@ -34,6 +34,9 @@ func (m rootModel) updateTopModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modals.Confirm:
 		t, cmd = t.Update(msg)
 		m.modals[idx] = t
+	case modals.Help:
+		t, cmd = t.Update(msg)
+		m.modals[idx] = t
 	}
 	return m, cmd
 }
@@ -71,6 +74,8 @@ func (m rootModel) activeKeyMap() help.KeyMap {
 	case modals.Edit:
 		return t.Keys()
 	case modals.Confirm:
+		return t.Keys()
+	case modals.Help:
 		return t.Keys()
 	}
 	return m.keys

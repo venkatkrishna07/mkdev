@@ -11,7 +11,7 @@ import (
 
 func TestTabBarHighlightsActive(t *testing.T) {
 	th := styles.NewTheme()
-	out := components.TabBar(th, []string{"Domains", "Projects", "Logs"}, 1)
+	out := components.TabBar(th, []string{"Domains", "Projects", "Logs"}, 1, 120)
 	require.Contains(t, out, "Domains")
 	require.Contains(t, out, "Projects")
 	require.Contains(t, out, "Logs")

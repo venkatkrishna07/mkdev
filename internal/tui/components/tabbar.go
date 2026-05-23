@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/venkatkrishna07/mkdev/internal/tui/styles"
 )
 
@@ -19,31 +20,73 @@ func useGlyphs() bool {
 	return os.Getenv("NO_NERD_FONT") == "" && os.Getenv("NO_COLOR") == ""
 }
 
-// TabBar renders a single-line tab strip. Active uses TabActive (filled
-// background); inactives use TabInactive.
-func TabBar(th styles.Theme, labels []string, active int) string {
+// TabBar renders a single-line tab strip. width caps the output; the bar
+// degrades to icon-only labels and finally to the active tab alone with
+// arrow hints when the full bar would overflow.
+func TabBar(th styles.Theme, labels []string, active, width int) string {
 	tabs := make([]Tab, len(labels))
 	for i, l := range labels {
 		tabs[i] = Tab{Label: l}
 	}
-	return TabBarRich(th, tabs, active)
+	return TabBarRich(th, tabs, active, width)
 }
 
-// TabBarRich draws tabs with optional per-tab icons.
-func TabBarRich(th styles.Theme, tabs []Tab, active int) string {
-	parts := make([]string, len(tabs))
+// TabBarRich draws tabs with optional per-tab icons, falling back to a
+// compact form when the rendered width exceeds the available terminal width.
+func TabBarRich(th styles.Theme, tabs []Tab, active, width int) string {
 	glyphs := useGlyphs()
+	sep := lipgloss.NewStyle().Foreground(th.Muted).Render("│")
+
+	build := func(labels []string) string {
+		parts := make([]string, len(labels))
+		for i, label := range labels {
+			if i == active {
+				parts[i] = th.TabActive.Render(label)
+			} else {
+				parts[i] = th.TabInactive.Render(label)
+			}
+		}
+		return strings.Join(parts, sep)
+	}
+
+	full := make([]string, len(tabs))
 	for i, t := range tabs {
 		label := t.Label
 		if glyphs && t.Icon != "" {
 			label = t.Icon + " " + t.Label
 		}
-		if i == active {
-			parts[i] = th.TabActive.Render(label)
-		} else {
-			parts[i] = th.TabInactive.Render(label)
+		full[i] = label
+	}
+	rendered := build(full)
+	if width <= 0 || lipgloss.Width(rendered) <= width {
+		return rendered
+	}
+
+	if glyphs {
+		iconsOnly := make([]string, len(tabs))
+		anyIcon := false
+		for i, t := range tabs {
+			if t.Icon != "" {
+				iconsOnly[i] = t.Icon
+				anyIcon = true
+			} else {
+				iconsOnly[i] = t.Label
+			}
+		}
+		if anyIcon {
+			rendered = build(iconsOnly)
+			if lipgloss.Width(rendered) <= width {
+				return rendered
+			}
 		}
 	}
-	sep := lipgloss.NewStyle().Foreground(th.Muted).Render("│")
-	return strings.Join(parts, sep)
+
+	activeLabel := full[active]
+	prev := th.Dim.Render("‹")
+	next := th.Dim.Render("›")
+	compact := prev + " " + th.TabActive.Render(activeLabel) + " " + next
+	if lipgloss.Width(compact) <= width {
+		return compact
+	}
+	return th.TabActive.Render(activeLabel)
 }

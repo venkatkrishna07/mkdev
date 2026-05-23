@@ -78,9 +78,26 @@ func (d Dashboard) Update(in tea.Msg) (Dashboard, tea.Cmd) {
 	return d, nil
 }
 
-// View renders the dashboard as a vertical stack of KPI cards, sparkline,
-// routes table, LAN strip, and a footer hint.
+// compact reports whether the dashboard should use its space-conserving
+// layout (single-line KPI summary, no sparkline, optional unbordered blocks).
+func (d Dashboard) compact() bool {
+	return d.height > 0 && (d.height < 16 || d.width < 110)
+}
+
+// View renders the dashboard. In full mode it stacks KPI cards, sparkline,
+// routes table, LAN strip, and a hint. In compact mode it drops the sparkline
+// and spacers and replaces the KPI cards with a single-line summary.
 func (d Dashboard) View() string {
+	if d.compact() {
+		bordered := d.height >= 12
+		sections := []string{
+			d.renderKPIsCompact(),
+			d.renderRoutesTableStyled(bordered),
+			d.renderLANStripStyled(bordered),
+			d.hint(),
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		d.renderKPIs(),
 		"",
@@ -115,6 +132,33 @@ func (d Dashboard) renderKPIs() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, cards...)
 }
 
+// renderKPIsCompact produces a single unbordered line summarising the
+// KPI cards, used by the compact layout.
+func (d Dashboard) renderKPIsCompact() string {
+	total := uint64(0)
+	if d.src.Total != nil {
+		total = d.src.Total()
+	}
+	active := 0
+	for _, r := range d.routes {
+		if r.Enabled {
+			active++
+		}
+	}
+
+	pair := func(label, value string) string {
+		return d.th.Title.Render(label) + " " + d.th.Dim.Render(value)
+	}
+	sep := d.th.Dim.Render(" · ")
+	parts := []string{
+		pair("routes", fmt.Sprintf("%d/%d", active, len(d.routes))),
+		pair("req", fmt.Sprintf("%d", total)),
+		pair("up", humanDuration(time.Since(d.src.Start))),
+		pair("CA", d.expiryLabel()),
+	}
+	return strings.Join(parts, sep)
+}
+
 func (d Dashboard) renderSparkline() string {
 	w := d.width
 	if w <= 0 {
@@ -137,20 +181,33 @@ func (d Dashboard) renderSparkline() string {
 }
 
 func (d Dashboard) renderRoutesTable() string {
+	return d.renderRoutesTableStyled(true)
+}
+
+// renderRoutesTableStyled renders the routes table, optionally wrapped in a
+// bordered block. When bordered is false the block is rendered as plain
+// title + body to save vertical space in the compact layout.
+func (d Dashboard) renderRoutesTableStyled(bordered bool) string {
 	w := d.width
 	if w <= 0 {
 		w = 100
 	}
 	title := d.th.Title.Render("Routes")
+	var body string
 	if d.src.Routes == nil || len(d.routes) == 0 {
-		return boxed(d.th, title+"\n"+d.th.Dim.Render("no routes configured"), w)
+		body = title + "\n" + d.th.Dim.Render("no routes configured")
+	} else {
+		rows := make([]string, 0, len(d.routes)+1)
+		rows = append(rows, title)
+		for _, r := range d.routes {
+			rows = append(rows, d.routeRow(r))
+		}
+		body = strings.Join(rows, "\n")
 	}
-	rows := make([]string, 0, len(d.routes)+1)
-	rows = append(rows, title)
-	for _, r := range d.routes {
-		rows = append(rows, d.routeRow(r))
+	if !bordered {
+		return body
 	}
-	return boxed(d.th, strings.Join(rows, "\n"), w)
+	return boxed(d.th, body, w)
 }
 
 func (d Dashboard) routeRow(r store.Route) string {
@@ -202,26 +259,38 @@ func (d Dashboard) routeRow(r store.Route) string {
 }
 
 func (d Dashboard) renderLANStrip() string {
+	return d.renderLANStripStyled(true)
+}
+
+// renderLANStripStyled renders the LAN strip, optionally wrapped in a
+// bordered block. When bordered is false the block is rendered as plain
+// title + body to save vertical space in the compact layout.
+func (d Dashboard) renderLANStripStyled(bordered bool) string {
 	w := d.width
 	if w <= 0 {
 		w = 100
 	}
 	title := d.th.Title.Render("LAN advertise")
-	if d.src.LAN == nil {
-		return boxed(d.th, title+"\n"+d.th.Dim.Render("⊘ unavailable"), w)
-	}
-	st := d.src.LAN()
 	var line string
-	switch {
-	case !st.Advertising:
-		line = d.th.Dim.Render("⊘ LAN unavailable")
-	case st.SharedCount == 0:
-		line = d.th.Dim.Render(fmt.Sprintf("⊘ no shared routes (host %s)", st.IP))
-	default:
-		pill := components.StatusPill(d.th, components.PillUp, "broadcasting")
-		line = fmt.Sprintf("%s  %s   %d shared route(s)", pill, st.IP, st.SharedCount)
+	if d.src.LAN == nil {
+		line = d.th.Dim.Render("⊘ unavailable")
+	} else {
+		st := d.src.LAN()
+		switch {
+		case !st.Advertising:
+			line = d.th.Dim.Render("⊘ LAN unavailable")
+		case st.SharedCount == 0:
+			line = d.th.Dim.Render(fmt.Sprintf("⊘ no shared routes (host %s)", st.IP))
+		default:
+			pill := components.StatusPill(d.th, components.PillUp, "broadcasting")
+			line = fmt.Sprintf("%s  %s   %d shared route(s)", pill, st.IP, st.SharedCount)
+		}
 	}
-	return boxed(d.th, title+"\n"+line, w)
+	body := title + "\n" + line
+	if !bordered {
+		return body
+	}
+	return boxed(d.th, body, w)
 }
 
 // boxed wraps body in a rounded bordered block tinted with the theme's muted color.

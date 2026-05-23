@@ -71,13 +71,12 @@ type rootModel struct {
 	logs        tabs.Logs
 	doctor      tabs.Doctor
 	settings    tabs.Settings
-	modals      []any // LIFO stack of modals.Add / modals.Edit / modals.Confirm
+	modals      []any // LIFO stack of modals.Add / modals.Edit / modals.Confirm / modals.Help
 	proxy       ProxyState
 	proxyCh     <-chan ProxyState
 	binPath     string
 	keys        KeyMap
 	help        help.Model
-	showHelp    bool
 	spinner     spinner.Model
 	busy        bool
 	active      tabIndex
@@ -287,7 +286,11 @@ func (m rootModel) handleGlobalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingQuit = true
 		return m, nil
 	case key.Matches(k, m.keys.Help):
-		m.showHelp = !m.showHelp
+		var flat []key.Binding
+		for _, row := range m.keys.FullHelp() {
+			flat = append(flat, row...)
+		}
+		m.modals = append(m.modals, modals.NewHelp(m.th, flat))
 		return m, nil
 	case key.Matches(k, m.keys.NextTab):
 		m.active = (m.active + 1) % tabIndex(len(tabLabels))
@@ -388,7 +391,7 @@ func (m rootModel) View() string {
 	}
 
 	header := components.Banner(m.th, version.Version, pill, width)
-	tabBar := components.TabBarRich(m.th, tabSpecs, int(m.active))
+	tabBar := components.TabBarRich(m.th, tabSpecs, int(m.active), width)
 	rule := m.th.Rule.Render(strings.Repeat("─", width))
 	var body string
 	switch m.active {
@@ -409,7 +412,6 @@ func (m rootModel) View() string {
 		body = m.spinner.View() + " " + m.th.Dim.Render("working…") + "\n" + body
 	}
 
-	m.help.ShowAll = m.showHelp
 	footer := m.help.View(m.activeKeyMap())
 
 	var toast string
@@ -423,6 +425,9 @@ func (m rootModel) View() string {
 	}
 	sections = append(sections, footer)
 	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	if m.height > 0 {
+		view = lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, view)
+	}
 
 	if len(m.modals) == 0 {
 		return view
@@ -435,6 +440,8 @@ func (m rootModel) View() string {
 	case modals.Edit:
 		modalView = t.View()
 	case modals.Confirm:
+		modalView = t.View()
+	case modals.Help:
 		modalView = t.View()
 	}
 	return lipgloss.Place(
