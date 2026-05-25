@@ -10,8 +10,6 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/client"
 )
 
-// State is the in-memory snapshot the renderer consumes. All access is
-// mutex-guarded; mutations come from the listener goroutine.
 type State struct {
 	mu       sync.Mutex
 	daemonUp bool
@@ -19,17 +17,15 @@ type State struct {
 	version  string
 	pid      int
 	uptime   string
-	routes   map[string]api.Route  // keyed by route name
-	stats    api.Stats             // latest stats.tick payload
-	health   map[string]api.Health // latest known health per domain (full domain key)
+	routes   map[string]api.Route
+	stats    api.Stats
+	health   map[string]api.Health
 }
 
-// NewState returns an empty State.
 func NewState() *State {
 	return &State{routes: map[string]api.Route{}, health: map[string]api.Health{}}
 }
 
-// Snapshot returns a copy of the current state, safe for the renderer.
 type Snapshot struct {
 	DaemonUp bool
 	TLD      string
@@ -41,8 +37,6 @@ type Snapshot struct {
 	Health   map[string]api.Health
 }
 
-// Snapshot copies the current state. Routes are sorted by name for stable
-// menu order across renders.
 func (s *State) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -66,8 +60,6 @@ func (s *State) Snapshot() Snapshot {
 	return out
 }
 
-// SetMeta records the daemon's self-reported version/pid/uptime (fetched
-// during initial Status call and on Reconnect).
 func (s *State) SetMeta(version string, pid int, uptime string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -76,7 +68,6 @@ func (s *State) SetMeta(version string, pid int, uptime string) {
 	s.uptime = uptime
 }
 
-// SetDaemonUp toggles the daemon-up flag, returning true if it changed.
 func (s *State) SetDaemonUp(up bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -87,15 +78,12 @@ func (s *State) SetDaemonUp(up bool) bool {
 	return true
 }
 
-// SetTLD records the daemon-reported TLD so we can render full domains.
 func (s *State) SetTLD(tld string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tld = tld
 }
 
-// ReplaceRoutes overwrites the cached route set (used after initial fetch
-// and on client.reconnected).
 func (s *State) ReplaceRoutes(rs []api.Route) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -105,8 +93,6 @@ func (s *State) ReplaceRoutes(rs []api.Route) {
 	}
 }
 
-// Apply mutates state from a daemon SSE event. Returns true if the snapshot
-// changed meaningfully (so the renderer should reconcile).
 func (s *State) Apply(ev api.Event) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -148,8 +134,7 @@ func (s *State) Apply(ev api.Event) bool {
 			return false
 		}
 		s.stats = st
-		// Health-change detection: re-render only when any route's health
-		// transitioned. Stats-only updates do not trigger a redraw.
+
 		changed := false
 		for domain, rs := range st.Routes {
 			prev, ok := s.health[domain]
@@ -158,7 +143,7 @@ func (s *State) Apply(ev api.Event) bool {
 				changed = true
 			}
 		}
-		// Drop entries for domains the daemon no longer reports.
+
 		for domain := range s.health {
 			if _, ok := st.Routes[domain]; !ok {
 				delete(s.health, domain)

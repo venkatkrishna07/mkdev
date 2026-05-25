@@ -10,7 +10,6 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/api"
 )
 
-// Routes lists all routes known to the daemon.
 func (c *Client) Routes(ctx context.Context) ([]api.Route, error) {
 	req, err := http.NewRequest(http.MethodGet, c.baseURL+"/v1/routes", nil)
 	if err != nil {
@@ -31,7 +30,6 @@ func (c *Client) Routes(ctx context.Context) ([]api.Route, error) {
 	return out, nil
 }
 
-// AddRoute creates a new route. The daemon validates name and target.
 func (c *Client) AddRoute(ctx context.Context, r api.Route) (api.Route, error) {
 	body, err := json.Marshal(r)
 	if err != nil {
@@ -57,7 +55,6 @@ func (c *Client) AddRoute(ctx context.Context, r api.Route) (api.Route, error) {
 	return out, nil
 }
 
-// RemoveRoute deletes the route by name.
 func (c *Client) RemoveRoute(ctx context.Context, name string) error {
 	req, err := http.NewRequest(http.MethodDelete, c.baseURL+"/v1/routes/"+name, nil)
 	if err != nil {
@@ -74,13 +71,11 @@ func (c *Client) RemoveRoute(ctx context.Context, name string) error {
 	return nil
 }
 
-// RouteEdit is the patch payload for EditRoute. Nil fields are not modified.
 type RouteEdit struct {
 	Target *string    `json:"target,omitempty"`
 	Share  *api.Share `json:"share,omitempty"`
 }
 
-// EditRoute applies non-nil fields to the route by name.
 func (c *Client) EditRoute(ctx context.Context, name string, e RouteEdit) (api.Route, error) {
 	body, err := json.Marshal(e)
 	if err != nil {
@@ -106,7 +101,6 @@ func (c *Client) EditRoute(ctx context.Context, name string, e RouteEdit) (api.R
 	return out, nil
 }
 
-// ToggleShare flips the LAN share bit on a route.
 func (c *Client) ToggleShare(ctx context.Context, name string, enabled bool) (api.Route, error) {
 	body, err := json.Marshal(map[string]bool{"enabled": enabled})
 	if err != nil {

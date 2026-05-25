@@ -10,7 +10,6 @@ import (
 
 var errExtraJSON = errors.New("trailing JSON after value")
 
-// NewHandler returns the daemon's http.Handler with all routes registered.
 func NewHandler(d *Daemon) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/routes", d.handleListRoutes)

@@ -112,7 +112,7 @@ func runDaemonServe(cmd *cobra.Command, _ []string) error {
 		case <-sigCh:
 		case <-stopCh:
 		case <-engineExited:
-			// Engine died (e.g. :443 in use). Shut API down so user sees the error.
+
 		}
 		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
 		defer cancel()
@@ -123,7 +123,6 @@ func runDaemonServe(cmd *cobra.Command, _ []string) error {
 	engineCancel()
 	<-engineExited
 	if engineErr != nil && !errors.Is(engineErr, context.Canceled) {
-		// Engine error already printed to stderr; return as the daemon's exit error.
 		return fmt.Errorf("daemon: engine: %w", engineErr)
 	}
 	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {

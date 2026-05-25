@@ -6,10 +6,6 @@ import (
 	"strings"
 )
 
-// configureLogLevel installs a stderr slog handler honoring MKDEV_LOG_LEVEL
-// (debug | info | warn | error). Defaults to info. Called once at the top of
-// `mkdev daemon serve` so the daemon's structured logs land on stderr in a
-// stable format regardless of any earlier configuration by cobra hooks.
 func configureLogLevel() {
 	lvl := slog.LevelInfo
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("MKDEV_LOG_LEVEL"))) {

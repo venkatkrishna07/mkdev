@@ -5,13 +5,6 @@ import (
 	"net/http"
 )
 
-// handleEvents streams hub events as Server-Sent Events. Each event is sent as
-//
-//	event: <type>
-//	data: <json>
-//	\n
-//
-// The connection stays open until the client disconnects or the hub closes.
 func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

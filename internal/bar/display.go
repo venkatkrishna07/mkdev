@@ -9,7 +9,6 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/api"
 )
 
-// healthDot returns a single-glyph status indicator for a route health.
 func healthDot(h api.Health) string {
 	switch h {
 	case api.HealthUp:
@@ -23,8 +22,6 @@ func healthDot(h api.Health) string {
 	}
 }
 
-// renderHeader formats the disabled top menu item that shows daemon liveness,
-// route count, the current rolling RPS, and (when known) version/uptime.
 func renderHeader(s Snapshot) string {
 	if !s.DaemonUp {
 		return "daemon: down"
@@ -42,7 +39,6 @@ func renderHeader(s Snapshot) string {
 	return strings.Join(parts, " · ")
 }
 
-// latestRPS returns the most recent per-second value from a rolling RPS slice.
 func latestRPS(window []float64) float64 {
 	if len(window) == 0 {
 		return 0

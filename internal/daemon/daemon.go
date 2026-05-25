@@ -14,33 +14,28 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/version"
 )
 
-// Options configures a Daemon.
 type Options struct {
-	HomeDir   string // resolved ~/.mkdev (or override)
-	TLD       string // route suffix, e.g. ".local"
-	ProxyPort int    // TLS listen port for the proxy; 0 disables proxy (API-only mode)
+	HomeDir   string
+	TLD       string
+	ProxyPort int
 }
 
-// Daemon is the orchestrator. It owns the store and (later) proxy/mdns.
-// HTTP server lifecycle is managed separately (see lifecycle.go and cli wiring).
 type Daemon struct {
 	opts      Options
 	store     *store.Store
 	startedAt time.Time
 	hub       *Hub
-	engine    *engine // nil when CA missing or ProxyPort == 0
+	engine    *engine
 
-	mu         sync.Mutex // serializes mutations and shutdownFn writes
+	mu         sync.Mutex
 	shutdownFn func()
 }
 
-// RouteEdit is the patch payload for EditRoute. Nil fields are not modified.
 type RouteEdit struct {
 	Target *string
 	Share  *api.Share
 }
 
-// New opens the store and returns a Daemon ready to serve requests.
 func New(opts Options) (*Daemon, error) {
 	if opts.HomeDir == "" {
 		return nil, fmt.Errorf("daemon: HomeDir required")
@@ -64,7 +59,8 @@ func New(opts Options) (*Daemon, error) {
 			d.engine = eng
 		}
 	}
-	slog.Info("daemon: ready",
+	slog.Info(
+		"daemon: ready",
 		"home", opts.HomeDir,
 		"tld", opts.TLD,
 		"proxy_port", opts.ProxyPort,
@@ -74,13 +70,12 @@ func New(opts Options) (*Daemon, error) {
 	return d, nil
 }
 
-// Close releases the store. Idempotent.
 func (d *Daemon) Close() error {
 	if d.hub != nil {
 		d.hub.Close()
 		d.hub = nil
 	}
-	// engine lifetime is bound to RunEngine's ctx; do not call into it here.
+
 	if d.store == nil {
 		return nil
 	}
@@ -89,10 +84,6 @@ func (d *Daemon) Close() error {
 	return err
 }
 
-// RunEngine starts the TLS proxy engine if available and blocks until ctx is
-// cancelled. Returns nil (no-op) when the engine was not constructed.
-// Safe to call once per Daemon. While the engine runs, a 1Hz ticker
-// broadcasts api.EventStatsTick on the hub.
 func (d *Daemon) RunEngine(ctx context.Context) error {
 	if d.engine == nil {
 		return nil
@@ -105,7 +96,6 @@ func (d *Daemon) RunEngine(ctx context.Context) error {
 	return d.engine.Start(ctx, routes)
 }
 
-// runStatsTicker publishes one EventStatsTick per second until ctx ends.
 func (d *Daemon) runStatsTicker(ctx context.Context) {
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
@@ -126,8 +116,6 @@ func (d *Daemon) runStatsTicker(ctx context.Context) {
 	}
 }
 
-// reloadEngine pushes the latest route snapshot to the engine's router + mDNS.
-// No-op when engine is nil.
 func (d *Daemon) reloadEngine() {
 	if d.engine == nil {
 		return
@@ -140,7 +128,6 @@ func (d *Daemon) reloadEngine() {
 	d.engine.Reload(routes)
 }
 
-// Routes returns all routes as api.Route.
 func (d *Daemon) Routes() ([]api.Route, error) {
 	srs, err := d.store.ListRoutes()
 	if err != nil {
@@ -153,7 +140,6 @@ func (d *Daemon) Routes() ([]api.Route, error) {
 	return out, nil
 }
 
-// AddRoute validates, persists, and returns the route as api.Route.
 func (d *Daemon) AddRoute(r api.Route) (api.Route, error) {
 	if err := ValidateName(r.Name); err != nil {
 		return api.Route{}, err
@@ -184,7 +170,6 @@ func (d *Daemon) AddRoute(r api.Route) (api.Route, error) {
 	return out, nil
 }
 
-// RemoveRoute deletes by name.
 func (d *Daemon) RemoveRoute(name string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -201,7 +186,6 @@ func (d *Daemon) RemoveRoute(name string) error {
 	return nil
 }
 
-// EditRoute applies non-nil fields and persists.
 func (d *Daemon) EditRoute(name string, e RouteEdit) (api.Route, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -229,8 +213,6 @@ func (d *Daemon) EditRoute(name string, e RouteEdit) (api.Route, error) {
 	return out, nil
 }
 
-// ToggleShare flips the shared bit on a route.
-// mDNS publication is handled by the engine on reload.
 func (d *Daemon) ToggleShare(name string, enabled bool) (api.Route, error) {
 	share := api.ShareNone
 	if enabled {
@@ -239,7 +221,6 @@ func (d *Daemon) ToggleShare(name string, enabled bool) (api.Route, error) {
 	return d.EditRoute(name, RouteEdit{Share: &share})
 }
 
-// Status returns daemon metadata for GET /v1/status.
 func (d *Daemon) Status() api.Status {
 	return api.Status{
 		Version:    version.String(),
@@ -252,14 +233,12 @@ func (d *Daemon) Status() api.Status {
 	}
 }
 
-// SetShutdownHook installs a callback invoked when /v1/shutdown is POSTed.
 func (d *Daemon) SetShutdownHook(fn func()) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.shutdownFn = fn
 }
 
-// invokeShutdownHook calls the installed hook (if any). Used by handlers.
 func (d *Daemon) invokeShutdownHook() {
 	d.mu.Lock()
 	fn := d.shutdownFn
@@ -269,5 +248,4 @@ func (d *Daemon) invokeShutdownHook() {
 	}
 }
 
-// Hub returns the SSE hub so HTTP handlers can subscribe consumers to events.
 func (d *Daemon) Hub() *Hub { return d.hub }

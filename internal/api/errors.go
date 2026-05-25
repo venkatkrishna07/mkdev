@@ -5,10 +5,8 @@ import (
 	"net/http"
 )
 
-// ErrorCode is the machine-readable identifier returned in api.Error responses.
 type ErrorCode string
 
-// Error code values returned by the daemon.
 const (
 	CodeRouteDuplicate     ErrorCode = "route.duplicate"
 	CodeRouteNotFound      ErrorCode = "route.not_found"
@@ -21,7 +19,6 @@ const (
 	CodeDaemonShuttingDown ErrorCode = "daemon.shutting_down"
 )
 
-// Error is the JSON body returned for all non-2xx daemon responses.
 type Error struct {
 	Code    ErrorCode `json:"code"`
 	Message string    `json:"message"`
@@ -31,7 +28,6 @@ func (e Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
-// HTTPStatus maps an error code to the HTTP status the daemon returns.
 func HTTPStatus(code ErrorCode) int {
 	switch code {
 	case CodeRouteDuplicate:

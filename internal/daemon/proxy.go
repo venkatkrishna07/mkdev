@@ -22,15 +22,11 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/store"
 )
 
-// engineOptions tunes the proxy engine. ProxyPort comes from config.toml.
 type engineOptions struct {
 	HomeDir   string
 	ProxyPort int
 }
 
-// engine owns the daemon's TLS proxy + cert issuer + prober + mDNS publisher.
-// Constructed lazily because it requires the CA on disk; a daemon may run
-// without it (API-only) when the user has not yet executed `mkdev install`.
 type engine struct {
 	opts   engineOptions
 	router *proxy.Router
@@ -45,8 +41,6 @@ type engine struct {
 	started bool
 }
 
-// newEngine constructs the engine. Returns an error only if the CA cannot be
-// loaded; callers may treat that as "skip proxy, API only".
 func newEngine(opts engineOptions, listRoutes func() ([]store.Route, error)) (*engine, error) {
 	ca, err := cert.LoadCA(filepath.Join(opts.HomeDir, "ca"))
 	if err != nil {
@@ -59,9 +53,6 @@ func newEngine(opts engineOptions, listRoutes func() ([]store.Route, error)) (*e
 	return &engine{opts: opts, router: router, issuer: issuer, stats: stats, prober: pr}, nil
 }
 
-// Start binds the TLS listener and runs the prober + mDNS publisher.
-// Blocks until ctx is cancelled or the server errors. Idempotent: calling
-// twice returns an error on the second call.
 func (e *engine) Start(ctx context.Context, initial []store.Route) error {
 	e.mu.Lock()
 	if e.started {
@@ -111,7 +102,7 @@ func (e *engine) Start(ctx context.Context, initial []store.Route) error {
 	e.srv = srv
 	e.mu.Unlock()
 
-	go func() { //nolint:gosec // shutdown uses a fresh context; parent ctx is already Done
+	go func() {
 		<-ctx.Done()
 		shutCtx, sc := context.WithTimeout(context.Background(), 5*time.Second)
 		defer sc()
@@ -133,8 +124,6 @@ func (e *engine) Start(ctx context.Context, initial []store.Route) error {
 	return nil
 }
 
-// Reload refreshes the router, prunes unused certs, and resyncs mDNS.
-// Safe to call from any goroutine; called by Daemon after each mutation.
 func (e *engine) Reload(routes []store.Route) {
 	e.router.Set(routes)
 	e.issuer.Prune(e.router.Has)
@@ -145,9 +134,6 @@ func (e *engine) Reload(routes []store.Route) {
 	}
 }
 
-// StatsSnapshot returns a current api.Stats payload built from the proxy
-// stats counters and the prober's health view. Routes argument supplies
-// the active domain list (used as the key set for the routes map).
 func (e *engine) StatsSnapshot(routes []store.Route) api.Stats {
 	out := api.Stats{
 		Tick:   time.Now(),

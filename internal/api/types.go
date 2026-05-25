@@ -1,23 +1,16 @@
-// Package api defines the wire types exchanged between the mkdev daemon and
-// its clients (CLI, TUI, status-bar app). Nothing in this package may import
-// any other internal/* package.
 package api
 
 import "time"
 
-// Share indicates whether a route is reachable from the LAN.
 type Share string
 
-// Share values.
 const (
 	ShareNone Share = "none"
 	ShareLAN  Share = "lan"
 )
 
-// Health reflects the current reachability of a route's upstream target.
 type Health string
 
-// Health values.
 const (
 	HealthUnknown Health = "unknown"
 	HealthProbing Health = "probing"
@@ -25,7 +18,6 @@ const (
 	HealthDown    Health = "down"
 )
 
-// Route is a single proxy route as exposed over the daemon API.
 type Route struct {
 	Name     string `json:"name"`
 	Target   string `json:"target"`
@@ -34,14 +26,11 @@ type Route struct {
 	Insecure bool   `json:"insecure"`
 }
 
-// RouteStats is the per-route slice of a stats.tick event.
 type RouteStats struct {
 	LastSeen time.Time `json:"last_seen"`
 	Health   Health    `json:"health"`
 }
 
-// Stats is the payload of an EventStatsTick event. RPS is a rolling per-second
-// counter (last N seconds); Total is cumulative since daemon start.
 type Stats struct {
 	Tick   time.Time             `json:"tick"`
 	Total  uint64                `json:"total"`
@@ -49,7 +38,6 @@ type Stats struct {
 	Routes map[string]RouteStats `json:"routes"`
 }
 
-// Status is the daemon's self-report returned by GET /v1/status.
 type Status struct {
 	Version    string    `json:"version"`
 	APIVersion string    `json:"api_version"`

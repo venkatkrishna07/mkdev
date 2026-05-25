@@ -10,8 +10,6 @@ import (
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
-// ValidateName checks that name is a valid DNS label fragment for a route.
-// Rules: lowercase a-z 0-9 and '-', must start alphanumeric, 1-63 chars.
 func ValidateName(name string) error {
 	if !nameRE.MatchString(name) {
 		return api.Error{
@@ -22,8 +20,6 @@ func ValidateName(name string) error {
 	return nil
 }
 
-// ValidateTarget checks that target parses as host:port or as a full URL
-// with http/https scheme and a host component.
 func ValidateTarget(target string) error {
 	if target == "" {
 		return targetErr("target empty")

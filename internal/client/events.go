@@ -15,20 +15,11 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/api"
 )
 
-// Synthetic event types emitted by Subscribe (not sent by daemon over the wire).
-// Consumers use these to drive UI affordances during transient disconnects.
 const (
 	EventClientDisconnected api.EventType = "client.disconnected"
 	EventClientReconnected  api.EventType = "client.reconnected"
 )
 
-// Subscribe opens an SSE stream from the daemon's /v1/events endpoint and
-// returns a channel of decoded events. The reader runs in a background
-// goroutine until ctx is cancelled. On EOF / network error the channel
-// emits EventClientDisconnected and the goroutine retries with backoff;
-// on successful reconnect EventClientReconnected is emitted.
-//
-// The returned channel is closed only when ctx is done.
 func (c *Client) Subscribe(ctx context.Context) <-chan api.Event {
 	out := make(chan api.Event, 64)
 	go c.subscribeLoop(ctx, out)
@@ -69,9 +60,6 @@ func (c *Client) subscribeLoop(ctx context.Context, out chan<- api.Event) {
 	}
 }
 
-// streamEvents opens one /v1/events connection and drains it until error / EOF.
-// Sets *connected = true after the response header is read so the caller knows
-// whether to emit a disconnected event on exit.
 func (c *Client) streamEvents(ctx context.Context, out chan<- api.Event, connected *bool) error {
 	req, err := http.NewRequest(http.MethodGet, c.baseURL+"/v1/events", nil)
 	if err != nil {
@@ -127,8 +115,7 @@ func (c *Client) streamEvents(ctx context.Context, out chan<- api.Event, connect
 			}
 			dataBuf.WriteString(chunk)
 		default:
-			// event/comment/id/retry lines are accepted but not needed —
-			// the envelope JSON in `data:` carries the Type.
+
 		}
 	}
 	if err := scanner.Err(); err != nil {
