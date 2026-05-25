@@ -64,6 +64,13 @@ func New(opts Options) (*Daemon, error) {
 			d.engine = eng
 		}
 	}
+	slog.Info("daemon: ready",
+		"home", opts.HomeDir,
+		"tld", opts.TLD,
+		"proxy_port", opts.ProxyPort,
+		"version", version.String(),
+		"engine", d.engine != nil,
+	)
 	return d, nil
 }
 
@@ -84,7 +91,8 @@ func (d *Daemon) Close() error {
 
 // RunEngine starts the TLS proxy engine if available and blocks until ctx is
 // cancelled. Returns nil (no-op) when the engine was not constructed.
-// Safe to call once per Daemon.
+// Safe to call once per Daemon. While the engine runs, a 1Hz ticker
+// broadcasts api.EventStatsTick on the hub.
 func (d *Daemon) RunEngine(ctx context.Context) error {
 	if d.engine == nil {
 		return nil
@@ -93,7 +101,29 @@ func (d *Daemon) RunEngine(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("daemon: list routes: %w", err)
 	}
+	go d.runStatsTicker(ctx)
 	return d.engine.Start(ctx, routes)
+}
+
+// runStatsTicker publishes one EventStatsTick per second until ctx ends.
+func (d *Daemon) runStatsTicker(ctx context.Context) {
+	t := time.NewTicker(1 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if d.engine == nil || d.hub == nil {
+				continue
+			}
+			routes, err := d.store.ListRoutes()
+			if err != nil {
+				continue
+			}
+			d.hub.Publish(api.NewEvent(api.EventStatsTick, d.engine.StatsSnapshot(routes)))
+		}
+	}
 }
 
 // reloadEngine pushes the latest route snapshot to the engine's router + mDNS.
@@ -150,6 +180,7 @@ func (d *Daemon) AddRoute(r api.Route) (api.Route, error) {
 	out := APIFromStore(sr)
 	d.hub.Publish(api.NewEvent(api.EventRouteAdded, out))
 	d.reloadEngine()
+	slog.Info("daemon: route added", "name", r.Name, "domain", domain, "target", r.Target, "share", out.Share)
 	return out, nil
 }
 
@@ -166,6 +197,7 @@ func (d *Daemon) RemoveRoute(name string) error {
 	}
 	d.hub.Publish(api.NewEvent(api.EventRouteRemoved, map[string]string{"name": name}))
 	d.reloadEngine()
+	slog.Info("daemon: route removed", "name", name, "domain", domain)
 	return nil
 }
 
@@ -193,11 +225,12 @@ func (d *Daemon) EditRoute(name string, e RouteEdit) (api.Route, error) {
 	out := APIFromStore(cur)
 	d.hub.Publish(api.NewEvent(api.EventRouteChanged, out))
 	d.reloadEngine()
+	slog.Info("daemon: route changed", "name", name, "domain", domain, "target", cur.Target, "share", out.Share)
 	return out, nil
 }
 
 // ToggleShare flips the shared bit on a route.
-// M1 does not publish via mDNS; that wiring lands in a later milestone.
+// mDNS publication is handled by the engine on reload.
 func (d *Daemon) ToggleShare(name string, enabled bool) (api.Route, error) {
 	share := api.ShareNone
 	if enabled {
@@ -213,7 +246,7 @@ func (d *Daemon) Status() api.Status {
 		APIVersion: api.APIVersion,
 		PID:        os.Getpid(),
 		Uptime:     time.Since(d.startedAt).Truncate(time.Second).String(),
-		CertReady:  false, // M1: not wired to cert package
+		CertReady:  d.engine != nil,
 		StartedAt:  d.startedAt,
 		TLD:        d.opts.TLD,
 	}

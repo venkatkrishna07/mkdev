@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -16,15 +17,16 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/client"
 	"github.com/venkatkrishna07/mkdev/internal/config"
 	mdnspkg "github.com/venkatkrishna07/mkdev/internal/mdns"
-	"github.com/venkatkrishna07/mkdev/internal/proxy"
 	"github.com/venkatkrishna07/mkdev/internal/proxy/prober"
 	"github.com/venkatkrishna07/mkdev/internal/store"
 )
 
+var jsonUnmarshal = json.Unmarshal
+
 // Runtime is the shared state of the TUI. After the daemon migration the
 // runtime no longer owns the proxy, store, mdns, or cert issuer — those live
-// in the daemon process. The TUI uses Client for reads/writes and keeps
-// nil-safe locals for Stats/Prober to preserve existing tab signatures.
+// in the daemon process. The TUI uses Client for reads/writes; live stats
+// arrive over the SSE event stream and are cached in liveStats.
 type Runtime struct {
 	Ctx    context.Context
 	Cancel context.CancelFunc
@@ -32,12 +34,12 @@ type Runtime struct {
 	Cfg    config.Config
 	Client *client.Client
 	CA     *x509.Certificate // loaded from disk for display; may be nil
-	Stats  *proxy.Stats      // local placeholder; never populated in TUI process
 	Prober *prober.Prober    // local; runs against routes fetched via client
 
-	mu     sync.Mutex
-	routes []store.Route
-	tld    string
+	mu        sync.Mutex
+	routes    []store.Route
+	tld       string
+	liveStats api.Stats
 
 	daemonUp atomic.Bool
 }
@@ -72,7 +74,6 @@ func NewRuntime(ctx context.Context, home string) (*Runtime, error) {
 		Home:   home,
 		Cfg:    cfg,
 		Client: c,
-		Stats:  proxy.NewStats(),
 		tld:    cfg.TLD,
 	}
 	if ca, err := cert.LoadCA(filepath.Join(home, "ca")); err == nil {
@@ -173,6 +174,71 @@ func (rt *Runtime) LANState() LANState {
 		}
 	}
 	return st
+}
+
+// TotalReqs returns the cumulative request count reported by the daemon.
+// Returns 0 if no stats.tick has been received yet.
+func (rt *Runtime) TotalReqs() uint64 {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.liveStats.Total
+}
+
+// RPSWindow returns the latest rolling per-second request counts from the
+// daemon. Returns nil if no stats.tick has been received yet.
+func (rt *Runtime) RPSWindow() []float64 {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if len(rt.liveStats.RPS) == 0 {
+		return nil
+	}
+	out := make([]float64, len(rt.liveStats.RPS))
+	copy(out, rt.liveStats.RPS)
+	return out
+}
+
+// LastSeenHost returns the time host last served a request, per the daemon.
+func (rt *Runtime) LastSeenHost(host string) time.Time {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rs, ok := rt.liveStats.Routes[host]; ok {
+		return rs.LastSeen
+	}
+	return time.Time{}
+}
+
+// SubscribeStats starts a background goroutine that consumes the daemon's
+// SSE stream and caches stats.tick events into liveStats. Idempotent? No —
+// call once per Runtime.
+func (rt *Runtime) SubscribeStats() {
+	go func() {
+		defer func() { _ = recover() }()
+		ch := rt.Client.Subscribe(rt.Ctx)
+		for ev := range ch {
+			switch ev.Type {
+			case api.EventStatsTick:
+				var s api.Stats
+				if err := decodeEventData(ev, &s); err != nil {
+					continue
+				}
+				rt.mu.Lock()
+				rt.liveStats = s
+				rt.mu.Unlock()
+			case client.EventClientReconnected:
+				rt.daemonUp.Store(true)
+			case client.EventClientDisconnected:
+				rt.daemonUp.Store(false)
+			}
+		}
+	}()
+}
+
+// decodeEventData unmarshals ev.Data into out.
+func decodeEventData(ev api.Event, out any) error {
+	if len(ev.Data) == 0 {
+		return errors.New("empty event data")
+	}
+	return jsonUnmarshal(ev.Data, out)
 }
 
 // routesFromAPI adapts daemon-API routes to the store.Route shape consumed

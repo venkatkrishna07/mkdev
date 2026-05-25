@@ -34,6 +34,21 @@ type Route struct {
 	Insecure bool   `json:"insecure"`
 }
 
+// RouteStats is the per-route slice of a stats.tick event.
+type RouteStats struct {
+	LastSeen time.Time `json:"last_seen"`
+	Health   Health    `json:"health"`
+}
+
+// Stats is the payload of an EventStatsTick event. RPS is a rolling per-second
+// counter (last N seconds); Total is cumulative since daemon start.
+type Stats struct {
+	Tick   time.Time             `json:"tick"`
+	Total  uint64                `json:"total"`
+	RPS    []float64             `json:"rps"`
+	Routes map[string]RouteStats `json:"routes"`
+}
+
 // Status is the daemon's self-report returned by GET /v1/status.
 type Status struct {
 	Version    string    `json:"version"`

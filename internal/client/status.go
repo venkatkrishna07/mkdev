@@ -9,6 +9,24 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/api"
 )
 
+// Shutdown asks the daemon to stop gracefully (POST /v1/shutdown).
+// Returns nil on 202 Accepted; daemon-down errors are wrapped as ErrDaemonDown.
+func (c *Client) Shutdown(ctx context.Context) error {
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/v1/shutdown", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.do(ctx, req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusAccepted {
+		return decodeError(resp)
+	}
+	return nil
+}
+
 // Status fetches the daemon's self-report.
 func (c *Client) Status(ctx context.Context) (api.Status, error) {
 	req, err := http.NewRequest(http.MethodGet, c.baseURL+"/v1/status", nil)
