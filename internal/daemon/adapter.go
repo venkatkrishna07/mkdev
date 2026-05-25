@@ -8,8 +8,6 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/store"
 )
 
-// APIFromStore converts a store record into a wire DTO.
-// Health is always HealthUnknown in M1; later milestones set it from the prober.
 func APIFromStore(r store.Route) api.Route {
 	share := api.ShareNone
 	if r.Shared {
@@ -24,7 +22,6 @@ func APIFromStore(r store.Route) api.Route {
 	}
 }
 
-// StoreFromAPI converts a wire DTO into a store record using the supplied TLD.
 func StoreFromAPI(r api.Route, tld string) store.Route {
 	return store.Route{
 		Domain:   r.Name + tld,
@@ -38,8 +35,6 @@ func StoreFromAPI(r api.Route, tld string) store.Route {
 	}
 }
 
-// SplitDomain returns the name portion of a domain by trimming the TLD suffix.
-// If domain does not end in tld, the original string is returned unchanged.
 func SplitDomain(domain, tld string) string {
 	name, _ := strings.CutSuffix(domain, tld)
 	return name

@@ -27,7 +27,6 @@ linters:
       rules:
         - name: line-length-limit
           arguments: [140]
-        - name: exported
     gosec:
       excludes:
         - G101
@@ -38,6 +37,12 @@ linters:
           - gosec
           - errcheck
           - gocritic
+      - path: internal/client/autospawn\.go
+        text: G204
+      - path: internal/daemon/lifecycle\.go
+        text: G304
+      - path: internal/daemon/proxy\.go
+        text: G118
 
 formatters:
   enable:

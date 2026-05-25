@@ -10,12 +10,8 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/api"
 )
 
-// ErrDaemonDown is returned when the daemon socket cannot be reached.
-// Callers can hint to the user to run `mkdev daemon serve`.
 var ErrDaemonDown = errors.New("daemon not running")
 
-// isDaemonDown returns true if err looks like a failed connection to the
-// daemon socket (socket missing, refused, or no listener).
 func isDaemonDown(err error) bool {
 	if err == nil {
 		return false
@@ -24,7 +20,7 @@ func isDaemonDown(err error) bool {
 	if errors.Is(err, io.EOF) {
 		return true
 	}
-	// net.OpError wraps these without exporting typed sentinels useful here.
+
 	for _, frag := range []string{"connect: no such file", "connect: connection refused", "connect: permission denied"} {
 		if containsFold(msg, frag) {
 			return true
@@ -65,9 +61,6 @@ func equalFold(a, b string) bool {
 	return true
 }
 
-// decodeError reads a non-2xx response body, decodes it as api.Error if
-// possible, and returns it as a Go error. The returned error supports
-// errors.As(&apiErr) so callers can switch on api.ErrorCode.
 func decodeError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 	var apiErr api.Error

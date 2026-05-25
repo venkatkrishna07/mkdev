@@ -9,7 +9,6 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/api"
 )
 
-// WriteJSON serializes v as JSON with the given status code.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -21,7 +20,6 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// WriteError writes a typed api.Error if err is one, else a generic 500.
 func WriteError(w http.ResponseWriter, err error) {
 	var apiErr api.Error
 	if errors.As(err, &apiErr) {
@@ -34,7 +32,6 @@ func WriteError(w http.ResponseWriter, err error) {
 	})
 }
 
-// Recoverer is HTTP middleware that turns panics into 500 responses.
 func Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

@@ -16,19 +16,14 @@ import (
 
 const clickTimeout = 5 * time.Second
 
-// routeMenu holds the systray items for a single route, plus the cancel
-// channel that tears down its click-handler goroutines on Hide.
 type routeMenu struct {
-	root  *systray.MenuItem // top-level entry "name → target"
-	share *systray.MenuItem // submenu checkbox "Share on LAN"
-	open  *systray.MenuItem // submenu entry "Open https://name.tld"
-	stop  chan struct{}     // closed when we hide/discard the item
+	root  *systray.MenuItem
+	share *systray.MenuItem
+	open  *systray.MenuItem
+	stop  chan struct{}
 	name  string
 }
 
-// Renderer owns the systray's menu items and reconciles them against State
-// snapshots. All systray API calls happen from the systray goroutine (which
-// is the main goroutine on macOS).
 type Renderer struct {
 	c         *client.Client
 	items     map[string]*routeMenu
@@ -38,14 +33,10 @@ type Renderer struct {
 	separator bool
 }
 
-// NewRenderer constructs an empty Renderer; call Init from inside the
-// systray.Run onReady callback to add the initial menu chrome.
 func NewRenderer(c *client.Client) *Renderer {
 	return &Renderer{c: c, items: map[string]*routeMenu{}}
 }
 
-// Init builds the static menu chrome (header + footer items). Routes are
-// appended on the first Reconcile call. Must run on the systray goroutine.
 func (r *Renderer) Init() {
 	systray.SetTitle("mkdev")
 	systray.SetTooltip("mkdev — local HTTPS dev proxy")
@@ -55,8 +46,6 @@ func (r *Renderer) Init() {
 	systray.AddSeparator()
 }
 
-// installFooter adds the bottom-of-menu controls. Called lazily on the first
-// Reconcile so it sits below the dynamic route list.
 func (r *Renderer) installFooter() {
 	if r.separator {
 		return
@@ -68,9 +57,6 @@ func (r *Renderer) installFooter() {
 	go r.handleFooter()
 }
 
-// Reconcile updates the systray menu to match the snapshot. Adds missing
-// routes, hides removed ones, updates share-checkbox state + health dot
-// in place. Coalesce upstream — calling this too often will cause flicker.
 func (r *Renderer) Reconcile(snap Snapshot) {
 	r.headerItm.SetTitle(renderHeader(snap))
 
