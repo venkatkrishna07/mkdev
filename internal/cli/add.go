@@ -1,18 +1,18 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/venkatkrishna07/mkdev/internal/config"
+	"github.com/venkatkrishna07/mkdev/internal/api"
+	"github.com/venkatkrishna07/mkdev/internal/client"
 	"github.com/venkatkrishna07/mkdev/internal/hosts"
-	"github.com/venkatkrishna07/mkdev/internal/store"
 )
 
 var addInsecure bool
@@ -29,33 +29,31 @@ func newAddCmd() *cobra.Command {
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
-	home, err := HomeDir()
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load(filepath.Join(home, "config.toml"))
-	if err != nil {
-		return err
-	}
 	name, target := args[0], args[1]
-	domain := strings.ToLower(name)
-	if !strings.HasSuffix(domain, cfg.TLD) {
-		domain += cfg.TLD
+	name = strings.ToLower(name)
+
+	c, err := client.New(client.Options{})
+	if err != nil {
+		return err
 	}
+	defer func() { _ = c.Close() }()
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+	defer cancel()
+
+	st, err := c.Status(ctx)
+	if err != nil {
+		return daemonError(err)
+	}
+	tld := st.TLD
+	if tld == "" {
+		tld = ".local"
+	}
+
+	rawName := strings.TrimSuffix(name, tld)
+	domain := rawName + tld
 	if !hosts.ValidHostname(domain) {
 		return fmt.Errorf("invalid domain %q", domain)
-	}
-
-	s, err := store.Open(filepath.Join(home, "state.db"))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = s.Close() }()
-
-	if existing, err := s.GetRoute(domain); err == nil {
-		return fmt.Errorf("route already exists: %s → %s", existing.Domain, existing.Target)
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return err
 	}
 
 	binPath, err := os.Executable()
@@ -66,22 +64,29 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if err := editor.Add(domain); err != nil {
 		return fmt.Errorf("hosts: %w", err)
 	}
-	r := store.Route{
-		Domain:   domain,
+
+	_, err = c.AddRoute(ctx, api.Route{
+		Name:     rawName,
 		Target:   target,
-		TLD:      cfg.TLD,
-		Enabled:  true,
+		Share:    api.ShareNone,
 		Insecure: addInsecure,
-		Source:   store.SourceAdHoc,
-		AddedAt:  time.Now().UTC(),
-	}
-	if err := s.PutRoute(r); err != nil {
+	})
+	if err != nil {
 		if remErr := editor.Remove(domain); remErr != nil {
 			slog.Error("inconsistent state", "domain", domain, "primary", err, "rollback", remErr)
 			return errors.Join(err, fmt.Errorf("rollback: %w", remErr))
 		}
-		return err
+		return daemonError(err)
 	}
+
 	Success(cmd.OutOrStdout(), fmt.Sprintf("added: https://%s → %s", domain, target))
 	return nil
+}
+
+// daemonError wraps client errors with a hint when the daemon is not running.
+func daemonError(err error) error {
+	if errors.Is(err, client.ErrDaemonDown) {
+		return fmt.Errorf("%w — start it with `mkdev daemon serve`", err)
+	}
+	return err
 }
