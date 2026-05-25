@@ -109,10 +109,10 @@ func newRootModel(rt *Runtime) rootModel {
 	dashSrc := tabs.DashSource{
 		Total: rt.Stats.Total,
 		RPS:   rt.Stats.RPS,
-		CA:    rt.Issuer.CACert(),
+		CA:    rt.CA,
 		Start: time.Now(),
 		Routes: func() []store.Route {
-			rs, _ := rt.Store.ListRoutes()
+			rs, _ := rt.LoadRoutes()
 			return rs
 		},
 		Health:   rt.Prober.Health,
@@ -131,7 +131,7 @@ func newRootModel(rt *Runtime) rootModel {
 			return tabs.LANState{IP: s.IP, Advertising: s.Advertising, SharedCount: s.SharedCount}
 		}),
 		logs:     tabs.NewLogs(th, logPath),
-		doctor:   tabs.NewDoctor(th, rt.Home, rt.Store),
+		doctor:   tabs.NewDoctor(th, rt.Home, rt.LoadRoutes),
 		settings: tabs.NewSettings(th, rt.Home),
 		binPath:  bp,
 		keys:     DefaultKeyMap,

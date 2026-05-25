@@ -20,11 +20,8 @@ func launchTUI(cmd *cobra.Command) error {
 		return err
 	}
 
-	if _, statErr := os.Stat(filepath.Join(home, "ca", "rootCA.pem")); os.IsNotExist(statErr) {
-		fmt.Fprintln(os.Stderr, "\x1b[33mmkdev: no root CA found.\x1b[0m")
-		fmt.Fprintln(os.Stderr, "Run `mkdev install` first to generate and trust the local CA.")
-		return fmt.Errorf("no root CA at %s", filepath.Join(home, "ca", "rootCA.pem"))
-	}
+	// CA presence is the daemon's concern now (it owns TLS termination);
+	// the TUI loads CA read-only for display only and tolerates absence.
 
 	prior := slog.Default()
 	defer slog.SetDefault(prior)

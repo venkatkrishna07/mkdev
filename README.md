@@ -198,11 +198,31 @@ mkdev uninstall --purge   # also delete ~/.mkdev/
 If something gets stuck, open **Keychain Access.app**, search for `mkdev`, and delete by hand. Then `grep mkdev /etc/hosts` and clean any leftovers.
 
 
+## Daemon (preview)
+
+`mkdev daemon serve` runs the local HTTP API as a long-running foreground process bound to a unix socket at `~/.mkdev/daemon.sock` (owner-only `0600`). Future milestones move the proxy, TUI, and a macOS status-bar app onto this daemon; today the API exposes route CRUD + status + shutdown so clients can be built against it.
+
+```sh
+mkdev daemon serve &
+curl --unix-socket ~/.mkdev/daemon.sock http://x/v1/status
+curl --unix-socket ~/.mkdev/daemon.sock -X POST http://x/v1/routes \
+     -H 'Content-Type: application/json' \
+     -d '{"name":"foo","target":"localhost:3000"}'
+curl --unix-socket ~/.mkdev/daemon.sock http://x/v1/routes
+curl --unix-socket ~/.mkdev/daemon.sock -X DELETE http://x/v1/routes/foo
+curl --unix-socket ~/.mkdev/daemon.sock -X POST http://x/v1/shutdown
+```
+
+The TUI and `mkdev add | list | remove` still operate directly on the local store; client migration through the daemon API lands in the next milestone. Until then, only one of {daemon, TUI, ad-hoc CLI command} can hold the bbolt lock at a time.
+
 ## Roadmap
 
 Next:
 
-- Background daemon (`mkdev up` / `mkdev down`); UDS IPC; launchd / systemd / Task Scheduler.
+- Client library + CLI subcommand migration onto the daemon API.
+- TUI migration: subscribe to the daemon's event stream (SSE), no in-process proxy.
+- macOS status-bar app (`mkdev bar`) consuming the same daemon API.
+- launchd / systemd user units for daemon supervision; auto-spawn fallback.
 - Project config file (`.mkdev.yaml` checked into the repo).
 - Firefox / NSS trust store integration.
 - Per-path routing (`/api` → 8080, `/ws` → 9000 on a single domain).

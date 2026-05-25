@@ -1,17 +1,17 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/venkatkrishna07/mkdev/internal/config"
+	"github.com/venkatkrishna07/mkdev/internal/client"
 	"github.com/venkatkrishna07/mkdev/internal/hosts"
-	"github.com/venkatkrishna07/mkdev/internal/store"
 )
 
 func newRemoveCmd() *cobra.Command {
@@ -25,32 +25,32 @@ func newRemoveCmd() *cobra.Command {
 }
 
 func runRemove(cmd *cobra.Command, args []string) error {
-	home, err := HomeDir()
+	name := strings.ToLower(args[0])
+
+	c, err := client.New(client.Options{})
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(filepath.Join(home, "config.toml"))
+	defer func() { _ = c.Close() }()
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+	defer cancel()
+
+	st, err := c.Status(ctx)
 	if err != nil {
-		return err
+		return daemonError(err)
 	}
-	domain := strings.ToLower(args[0])
-	if !strings.HasSuffix(domain, cfg.TLD) {
-		domain += cfg.TLD
+	tld := st.TLD
+	if tld == "" {
+		tld = ".local"
 	}
+
+	rawName := strings.TrimSuffix(name, tld)
+	domain := rawName + tld
 	if !hosts.ValidHostname(domain) {
 		return fmt.Errorf("invalid domain %q", domain)
 	}
-	s, err := store.Open(filepath.Join(home, "state.db"))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = s.Close() }()
-	if _, err := s.GetRoute(domain); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("no such route: %s", domain)
-		}
-		return err
-	}
+
 	binPath, err := os.Executable()
 	if err != nil {
 		return err
@@ -59,13 +59,15 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	if err := editor.Remove(domain); err != nil {
 		return fmt.Errorf("hosts: %w", err)
 	}
-	if err := s.DeleteRoute(domain); err != nil {
+
+	if err := c.RemoveRoute(ctx, rawName); err != nil {
 		if addErr := editor.Add(domain); addErr != nil {
 			slog.Error("inconsistent state", "domain", domain, "primary", err, "rollback", addErr)
 			return errors.Join(err, fmt.Errorf("rollback: %w", addErr))
 		}
-		return err
+		return daemonError(err)
 	}
+
 	Success(cmd.OutOrStdout(), "removed: "+domain)
 	return nil
 }
