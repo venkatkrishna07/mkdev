@@ -128,8 +128,6 @@ func (d Domains) Init() tea.Cmd { return nil }
 
 // Update handles route refresh and window-size events.
 func (d Domains) Update(in tea.Msg) (Domains, tea.Cmd) {
-	var cmd tea.Cmd
-	d.table, cmd = d.table.Update(in)
 	switch m := in.(type) {
 	case msg.RoutesRefreshed:
 		d.routes = m.Routes
@@ -142,6 +140,8 @@ func (d Domains) Update(in tea.Msg) (Domains, tea.Cmd) {
 		d.table.SetWidth(tableTotalWidth(cols))
 		d.fitHeight()
 	}
+	var cmd tea.Cmd
+	d.table, cmd = d.table.Update(in)
 	return d, cmd
 }
 
