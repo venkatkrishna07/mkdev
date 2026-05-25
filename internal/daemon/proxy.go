@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/venkatkrishna07/mkdev/internal/api"
 	"github.com/venkatkrishna07/mkdev/internal/cert"
 	mdnspkg "github.com/venkatkrishna07/mkdev/internal/mdns"
 	"github.com/venkatkrishna07/mkdev/internal/proxy"
@@ -142,4 +143,33 @@ func (e *engine) Reload(routes []store.Route) {
 			slog.Warn("daemon engine: mdns refresh", "err", err)
 		}
 	}
+}
+
+// StatsSnapshot returns a current api.Stats payload built from the proxy
+// stats counters and the prober's health view. Routes argument supplies
+// the active domain list (used as the key set for the routes map).
+func (e *engine) StatsSnapshot(routes []store.Route) api.Stats {
+	out := api.Stats{
+		Tick:   time.Now(),
+		Total:  e.stats.Total(),
+		RPS:    e.stats.RPS(),
+		Routes: make(map[string]api.RouteStats, len(routes)),
+	}
+	for _, r := range routes {
+		health := api.HealthUnknown
+		hs := e.prober.Health(r.Domain)
+		switch hs.Status.String() {
+		case "up":
+			health = api.HealthUp
+		case "down":
+			health = api.HealthDown
+		case "checking":
+			health = api.HealthProbing
+		}
+		out.Routes[r.Domain] = api.RouteStats{
+			LastSeen: e.stats.LastSeen(r.Domain),
+			Health:   health,
+		}
+	}
+	return out
 }

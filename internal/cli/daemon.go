@@ -22,7 +22,15 @@ func newDaemonCmd() *cobra.Command {
 		Short: "Manage the mkdev background daemon",
 		Long:  "Manage the mkdev background daemon that owns the proxy and serves a local HTTP API over a unix socket.",
 	}
-	cmd.AddCommand(newDaemonServeCmd())
+	cmd.AddCommand(
+		newDaemonServeCmd(),
+		newDaemonInstallCmd(),
+		newDaemonUninstallCmd(),
+		newDaemonEnableCmd(),
+		newDaemonDisableCmd(),
+		newDaemonStopCmd(),
+		newDaemonStatusCmd(),
+	)
 	return cmd
 }
 
@@ -38,6 +46,7 @@ stop gracefully.`,
 }
 
 func runDaemonServe(cmd *cobra.Command, _ []string) error {
+	configureLogLevel()
 	home, err := HomeDir()
 	if err != nil {
 		return err

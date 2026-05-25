@@ -79,15 +79,6 @@ func (m rootModel) commitDelete(r store.Route) tea.Cmd {
 	}
 }
 
-// toggleRoute is retained for UX symmetry but is a no-op against the daemon
-// API today (api.Route has no Enabled field; all daemon-managed routes are
-// enabled). Returns the current snapshot so the table redraws unchanged.
-func (m rootModel) toggleRoute(_ store.Route) tea.Cmd {
-	return func() tea.Msg {
-		return refreshAfterMutate(m.rt)
-	}
-}
-
 func (m rootModel) toggleShare(r store.Route) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(m.rt.Ctx, 5*time.Second)

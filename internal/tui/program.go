@@ -107,8 +107,8 @@ func newRootModel(rt *Runtime) rootModel {
 
 	logPath := filepath.Join(rt.Home, "logs", "tui.log")
 	dashSrc := tabs.DashSource{
-		Total: rt.Stats.Total,
-		RPS:   rt.Stats.RPS,
+		Total: rt.TotalReqs,
+		RPS:   rt.RPSWindow,
 		CA:    rt.CA,
 		Start: time.Now(),
 		Routes: func() []store.Route {
@@ -116,20 +116,25 @@ func newRootModel(rt *Runtime) rootModel {
 			return rs
 		},
 		Health:   rt.Prober.Health,
-		LastSeen: rt.Stats.LastSeen,
+		LastSeen: rt.LastSeenHost,
 		LAN: func() tabs.LANState {
 			s := rt.LANState()
 			return tabs.LANState{IP: s.IP, Advertising: s.Advertising, SharedCount: s.SharedCount}
 		},
 	}
+	rt.SubscribeStats()
 	return rootModel{
 		rt:        rt,
 		th:        th,
 		dashboard: tabs.NewDashboard(th, dashSrc),
-		domains: tabs.NewDomainsWithSources(th, 100, 24, rt.Stats.Snapshot, rt.Prober.Health, func() tabs.LANState {
-			s := rt.LANState()
-			return tabs.LANState{IP: s.IP, Advertising: s.Advertising, SharedCount: s.SharedCount}
-		}),
+		domains: tabs.NewDomainsWithSources(th, 100, 24,
+			func(string) []time.Duration { return nil },
+			rt.Prober.Health,
+			func() tabs.LANState {
+				s := rt.LANState()
+				return tabs.LANState{IP: s.IP, Advertising: s.Advertising, SharedCount: s.SharedCount}
+			},
+		),
 		logs:     tabs.NewLogs(th, logPath),
 		doctor:   tabs.NewDoctor(th, rt.Home, rt.LoadRoutes),
 		settings: tabs.NewSettings(th, rt.Home),
@@ -332,12 +337,6 @@ func (m rootModel) handleGlobalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(k, m.keys.Delete):
 		if r, ok := m.domains.Selected(); ok {
 			m.modals = append(m.modals, modals.NewConfirm(m.th, fmt.Sprintf("Delete %s?", r.Domain), "removes /etc/hosts entry"))
-		}
-		return m, nil
-	case key.Matches(k, m.keys.Toggle):
-		if r, ok := m.domains.Selected(); ok {
-			m.busy = true
-			return m, tea.Batch(m.toggleRoute(r), m.spinner.Tick)
 		}
 		return m, nil
 	case key.Matches(k, m.keys.Share):
