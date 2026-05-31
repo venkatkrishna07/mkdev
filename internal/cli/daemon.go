@@ -97,6 +97,7 @@ func runDaemonServe(cmd *cobra.Command, _ []string) error {
 
 	engineCtx, engineCancel := context.WithCancel(cmd.Context())
 	defer engineCancel()
+	go d.RunStatusTicker(engineCtx)
 	var engineErr error
 	engineExited := make(chan struct{})
 	go func() {

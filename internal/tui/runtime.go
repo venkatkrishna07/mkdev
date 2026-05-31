@@ -26,7 +26,7 @@ var jsonUnmarshal = json.Unmarshal
 // Runtime is the shared state of the TUI. After the daemon migration the
 // runtime no longer owns the proxy, store, mdns, or cert issuer — those live
 // in the daemon process. The TUI uses Client for reads/writes; live stats
-// arrive over the SSE event stream and are cached in liveStats.
+// and route changes arrive over the SSE event stream.
 type Runtime struct {
 	Ctx    context.Context
 	Cancel context.CancelFunc
@@ -34,12 +34,12 @@ type Runtime struct {
 	Cfg    config.Config
 	Client *client.Client
 	CA     *x509.Certificate // loaded from disk for display; may be nil
-	Prober *prober.Prober    // local; runs against routes fetched via client
 
 	mu        sync.Mutex
 	routes    []store.Route
 	tld       string
 	liveStats api.Stats
+	send      func(tea.Msg)
 
 	daemonUp atomic.Bool
 }
@@ -79,7 +79,6 @@ func NewRuntime(ctx context.Context, home string) (*Runtime, error) {
 	if ca, err := cert.LoadCA(filepath.Join(home, "ca")); err == nil {
 		rt.CA = ca.Cert
 	}
-	rt.Prober = prober.New(rt.proberRoutes, 2*time.Second, 500*time.Millisecond)
 	return rt, nil
 }
 
@@ -109,15 +108,6 @@ func (rt *Runtime) LoadRoutes() ([]store.Route, error) {
 	return out, nil
 }
 
-// proberRoutes is the callback the prober uses to discover targets to probe.
-func (rt *Runtime) proberRoutes() ([]store.Route, error) {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	out := make([]store.Route, len(rt.routes))
-	copy(out, rt.routes)
-	return out, nil
-}
-
 // StartProxy probes the daemon's liveness and emits ProxyState. It does NOT
 // start a TLS listener — the daemon owns the proxy. The channel emits one
 // initial state, then closes on Ctx.Done.
@@ -142,19 +132,42 @@ func (rt *Runtime) StartProxy() <-chan ProxyState {
 		}
 		<-rt.Ctx.Done()
 	}()
-	go func() {
-		defer func() { _ = recover() }()
-		rt.Prober.Run(rt.Ctx)
-	}()
 	return ch
 }
 
-// RefreshTick is a tea.Cmd that returns a RoutesRefreshed after delay.
-func (rt *Runtime) RefreshTick(delay time.Duration) tea.Cmd {
-	return tea.Tick(delay, func(time.Time) tea.Msg {
-		rs, err := rt.LoadRoutes()
-		return RoutesRefreshed{Routes: rs, Err: err}
-	})
+func (rt *Runtime) SetSender(send func(tea.Msg)) {
+	rt.mu.Lock()
+	rt.send = send
+	rt.mu.Unlock()
+}
+
+func (rt *Runtime) push(msg tea.Msg) {
+	rt.mu.Lock()
+	send := rt.send
+	rt.mu.Unlock()
+	if send != nil {
+		send(msg)
+	}
+}
+
+func (rt *Runtime) HealthOf(domain string) prober.HealthState {
+	rt.mu.Lock()
+	rs, ok := rt.liveStats.Routes[domain]
+	tick := rt.liveStats.Tick
+	rt.mu.Unlock()
+	if !ok {
+		return prober.HealthState{}
+	}
+	st := prober.HealthState{LastProbe: tick}
+	switch rs.Health {
+	case api.HealthUp:
+		st.Status = prober.StatusUp
+	case api.HealthDown:
+		st.Status = prober.StatusDown
+	default:
+		st.Status = prober.StatusOff
+	}
+	return st
 }
 
 // LANState reports LAN-share visibility. Advertising tracks daemon liveness
@@ -207,10 +220,7 @@ func (rt *Runtime) LastSeenHost(host string) time.Time {
 	return time.Time{}
 }
 
-// SubscribeStats starts a background goroutine that consumes the daemon's
-// SSE stream and caches stats.tick events into liveStats. Idempotent? No —
-// call once per Runtime.
-func (rt *Runtime) SubscribeStats() {
+func (rt *Runtime) SubscribeEvents() {
 	go func() {
 		defer func() { _ = recover() }()
 		ch := rt.Client.Subscribe(rt.Ctx)
@@ -224,8 +234,13 @@ func (rt *Runtime) SubscribeStats() {
 				rt.mu.Lock()
 				rt.liveStats = s
 				rt.mu.Unlock()
+			case api.EventRouteAdded, api.EventRouteChanged, api.EventRouteRemoved:
+				rs, err := rt.LoadRoutes()
+				rt.push(RoutesRefreshed{Routes: rs, Err: err})
 			case client.EventClientReconnected:
 				rt.daemonUp.Store(true)
+				rs, err := rt.LoadRoutes()
+				rt.push(RoutesRefreshed{Routes: rs, Err: err})
 			case client.EventClientDisconnected:
 				rt.daemonUp.Store(false)
 			}
@@ -233,7 +248,13 @@ func (rt *Runtime) SubscribeStats() {
 	}()
 }
 
-// decodeEventData unmarshals ev.Data into out.
+func (rt *Runtime) RefreshNow() tea.Cmd {
+	return func() tea.Msg {
+		rs, err := rt.LoadRoutes()
+		return RoutesRefreshed{Routes: rs, Err: err}
+	}
+}
+
 func decodeEventData(ev api.Event, out any) error {
 	if len(ev.Data) == 0 {
 		return errors.New("empty event data")
@@ -241,8 +262,6 @@ func decodeEventData(ev api.Event, out any) error {
 	return jsonUnmarshal(ev.Data, out)
 }
 
-// routesFromAPI adapts daemon-API routes to the store.Route shape consumed
-// by tab rendering code. Health is dropped (tabs derive health from prober).
 func routesFromAPI(in []api.Route, tld string) []store.Route {
 	out := make([]store.Route, 0, len(in))
 	for _, r := range in {
@@ -259,5 +278,3 @@ func routesFromAPI(in []api.Route, tld string) []store.Route {
 	return out
 }
 
-// silence unused import on platforms where errors is unused.
-var _ = errors.New

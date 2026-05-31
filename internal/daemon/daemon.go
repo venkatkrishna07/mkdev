@@ -96,6 +96,22 @@ func (d *Daemon) RunEngine(ctx context.Context) error {
 	return d.engine.Start(ctx, routes)
 }
 
+func (d *Daemon) RunStatusTicker(ctx context.Context) {
+	t := time.NewTicker(1 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if d.hub == nil {
+				continue
+			}
+			d.hub.Publish(api.NewEvent(api.EventStatusTick, d.Status()))
+		}
+	}
+}
+
 func (d *Daemon) runStatsTicker(ctx context.Context) {
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()

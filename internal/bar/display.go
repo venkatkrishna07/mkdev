@@ -1,10 +1,7 @@
-//go:build darwin
-
 package bar
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/venkatkrishna07/mkdev/internal/api"
 )
@@ -22,26 +19,30 @@ func healthDot(h api.Health) string {
 	}
 }
 
-func renderHeader(s Snapshot) string {
-	if !s.DaemonUp {
-		return "daemon: down"
+func renderBrand(s Snapshot) string {
+	if s.Version == "" {
+		return "mkdev"
 	}
-	parts := []string{fmt.Sprintf("daemon: up · %d routes", len(s.Routes))}
-	if rps := latestRPS(s.Stats.RPS); rps > 0 {
-		parts = append(parts, fmt.Sprintf("%.1f req/s", rps))
-	}
-	if s.Version != "" {
-		parts = append(parts, "v"+s.Version)
-	}
-	if s.Uptime != "" {
-		parts = append(parts, "up "+s.Uptime)
-	}
-	return strings.Join(parts, " · ")
+	return "mkdev v" + s.Version
 }
 
-func latestRPS(window []float64) float64 {
-	if len(window) == 0 {
-		return 0
+func renderStatus(s Snapshot) string {
+	if !s.DaemonUp {
+		return "Status:  ✗ daemon down"
 	}
-	return window[len(window)-1]
+	return "Status:  ● running"
+}
+
+func renderUptime(s Snapshot) string {
+	if !s.DaemonUp || s.Uptime == "" {
+		return "Uptime:  —"
+	}
+	return "Uptime:  " + s.Uptime
+}
+
+func renderTraffic(s Snapshot) string {
+	if !s.DaemonUp || s.Stats.Tick.IsZero() {
+		return "Traffic: —"
+	}
+	return fmt.Sprintf("Traffic: %d total", s.Stats.Total)
 }

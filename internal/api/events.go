@@ -10,6 +10,7 @@ const (
 	EventRouteRemoved EventType = "route.removed"
 	EventHealthChange EventType = "health.changed"
 	EventStatsTick    EventType = "stats.tick"
+	EventStatusTick   EventType = "status.tick"
 	EventLogLine      EventType = "log.line"
 )
 
