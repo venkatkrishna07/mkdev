@@ -1,5 +1,3 @@
-//go:build darwin
-
 package bar
 
 import (
@@ -127,6 +125,18 @@ func (s *State) Apply(ev api.Event) bool {
 			return false
 		}
 		s.daemonUp = true
+		return true
+	case api.EventStatusTick:
+		var st api.Status
+		if err := json.Unmarshal(ev.Data, &st); err != nil {
+			return false
+		}
+		s.version = st.Version
+		s.pid = st.PID
+		s.uptime = st.Uptime
+		if s.tld == "" {
+			s.tld = st.TLD
+		}
 		return true
 	case api.EventStatsTick:
 		var st api.Stats

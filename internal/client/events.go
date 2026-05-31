@@ -66,7 +66,7 @@ func (c *Client) streamEvents(ctx context.Context, out chan<- api.Event, connect
 		return err
 	}
 	req.Header.Set("Accept", "text/event-stream")
-	resp, err := c.do(ctx, req)
+	resp, err := c.doStream(ctx, req)
 	if err != nil {
 		return err
 	}

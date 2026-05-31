@@ -2,11 +2,37 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"net"
+	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/venkatkrishna07/mkdev/internal/api"
 	"github.com/venkatkrishna07/mkdev/internal/cli"
 )
+
+func stubDaemon(t *testing.T, home string) {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.Status{Version: "test", APIVersion: api.APIVersion, TLD: ".local"})
+	})
+	mux.HandleFunc("GET /v1/routes", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]api.Route{})
+	})
+	ln, err := net.Listen("unix", filepath.Join(home, "daemon.sock"))
+	require.NoError(t, err)
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() {
+		_ = srv.Close()
+		_ = ln.Close()
+	})
+}
 
 func TestRootHelp(t *testing.T) {
 	root := cli.New()
@@ -49,7 +75,9 @@ func TestRemoveRequiresOneArg(t *testing.T) {
 }
 
 func TestListWorksOnFreshHome(t *testing.T) {
-	t.Setenv("MKDEV_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("MKDEV_HOME", home)
+	stubDaemon(t, home)
 	root := cli.New()
 	buf := &bytes.Buffer{}
 	root.SetOut(buf)
@@ -60,7 +88,9 @@ func TestListWorksOnFreshHome(t *testing.T) {
 }
 
 func TestListJSONWorksOnFreshHome(t *testing.T) {
-	t.Setenv("MKDEV_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("MKDEV_HOME", home)
+	stubDaemon(t, home)
 	root := cli.New()
 	buf := &bytes.Buffer{}
 	root.SetOut(buf)

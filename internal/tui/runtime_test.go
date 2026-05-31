@@ -2,6 +2,9 @@ package tui_test
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,6 +23,20 @@ func TestNewRuntimeRefresh(t *testing.T) {
 	cfg := config.Default()
 	cfg.ProxyPort = 18443
 	require.NoError(t, config.Save(filepath.Join(home, "config.toml"), cfg))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/routes", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	ln, err := net.Listen("unix", filepath.Join(home, "daemon.sock"))
+	require.NoError(t, err)
+	defer func() { _ = ln.Close() }()
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+
+	t.Setenv("MKDEV_HOME", home)
 
 	rt, err := tui.NewRuntime(context.Background(), home)
 	require.NoError(t, err)

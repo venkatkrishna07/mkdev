@@ -1,9 +1,8 @@
-//go:build darwin
-
 package bar
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"time"
@@ -11,6 +10,12 @@ import (
 	"github.com/getlantern/systray"
 	"github.com/venkatkrishna07/mkdev/internal/client"
 )
+
+//go:embed assets/icon-template.png
+var iconTemplateBytes []byte
+
+//go:embed assets/icon-regular.png
+var iconRegularBytes []byte
 
 const reconcileDelay = 250 * time.Millisecond
 

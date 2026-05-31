@@ -57,6 +57,8 @@ func Run(rt *Runtime) error {
 	defer rt.Cancel()
 	m := newRootModel(rt)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	rt.SetSender(p.Send)
+	rt.SubscribeEvents()
 	_, err := p.Run()
 	return err
 }
@@ -115,21 +117,20 @@ func newRootModel(rt *Runtime) rootModel {
 			rs, _ := rt.LoadRoutes()
 			return rs
 		},
-		Health:   rt.Prober.Health,
+		Health:   rt.HealthOf,
 		LastSeen: rt.LastSeenHost,
 		LAN: func() tabs.LANState {
 			s := rt.LANState()
 			return tabs.LANState{IP: s.IP, Advertising: s.Advertising, SharedCount: s.SharedCount}
 		},
 	}
-	rt.SubscribeStats()
 	return rootModel{
 		rt:        rt,
 		th:        th,
 		dashboard: tabs.NewDashboard(th, dashSrc),
 		domains: tabs.NewDomainsWithSources(th, 100, 24,
 			func(string) []time.Duration { return nil },
-			rt.Prober.Health,
+			rt.HealthOf,
 			func() tabs.LANState {
 				s := rt.LANState()
 				return tabs.LANState{IP: s.IP, Advertising: s.Advertising, SharedCount: s.SharedCount}
@@ -162,7 +163,7 @@ type errExpiredMsg struct{}
 func (m rootModel) Init() tea.Cmd {
 	return tea.Batch(
 		func() tea.Msg { return proxyStartedMsg{ch: m.rt.StartProxy()} },
-		m.rt.RefreshTick(0),
+		m.rt.RefreshNow(),
 		m.spinner.Tick,
 		m.logs.Init(),
 		m.dashboard.Init(),
@@ -220,7 +221,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd, dashCmd tea.Cmd
 		m.domains, cmd = m.domains.Update(msg)
 		m.dashboard, dashCmd = m.dashboard.Update(msg)
-		return m, tea.Batch(cmd, dashCmd, m.rt.RefreshTick(time.Second))
+		return m, tea.Batch(cmd, dashCmd)
 
 	case tabs.DashboardTickMsg:
 		var cmd tea.Cmd
