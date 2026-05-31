@@ -46,6 +46,7 @@ func New() *cobra.Command {
 		newServeCmd(),
 		newInstallCmd(),
 		newUninstallCmd(),
+		newStatusCmd(),
 		newHostsHelperCmd(),
 		tui,
 		newDaemonCmd(),

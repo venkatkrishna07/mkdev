@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/venkatkrishna07/mkdev/internal/bar"
 	"github.com/venkatkrishna07/mkdev/internal/config"
 	"github.com/venkatkrishna07/mkdev/internal/daemon"
 )
@@ -83,6 +85,10 @@ func runDaemonServe(cmd *cobra.Command, _ []string) error {
 
 	socketPath := daemon.SocketPath(home)
 	_, _ = fmt.Fprintf(cmd.OutOrStderr(), "mkdev daemon: API listening on %s\n", socketPath)
+
+	if err := bar.SpawnIfNeeded(); err != nil {
+		slog.Warn("daemon: bar autospawn failed", "err", err)
+	}
 
 	stopCh := make(chan struct{}, 1)
 	d.SetShutdownHook(func() {

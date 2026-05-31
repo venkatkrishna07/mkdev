@@ -32,8 +32,9 @@ type Daemon struct {
 }
 
 type RouteEdit struct {
-	Target *string
-	Share  *api.Share
+	Target  *string
+	Share   *api.Share
+	Enabled *bool
 }
 
 func New(opts Options) (*Daemon, error) {
@@ -219,6 +220,9 @@ func (d *Daemon) EditRoute(name string, e RouteEdit) (api.Route, error) {
 	if e.Share != nil {
 		cur.Shared = *e.Share == api.ShareLAN
 	}
+	if e.Enabled != nil {
+		cur.Enabled = *e.Enabled
+	}
 	if err := d.store.PutRoute(cur); err != nil {
 		return api.Route{}, api.Error{Code: api.CodeStoreWriteFailed, Message: err.Error()}
 	}
@@ -246,6 +250,7 @@ func (d *Daemon) Status() api.Status {
 		CertReady:  d.engine != nil,
 		StartedAt:  d.startedAt,
 		TLD:        d.opts.TLD,
+		ProxyPort:  d.opts.ProxyPort,
 	}
 }
 

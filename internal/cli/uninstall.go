@@ -1,13 +1,18 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/venkatkrishna07/mkdev/internal/bar"
+	"github.com/venkatkrishna07/mkdev/internal/cert"
 	"github.com/venkatkrishna07/mkdev/internal/cert/trust"
+	"github.com/venkatkrishna07/mkdev/internal/daemon"
 	"github.com/venkatkrishna07/mkdev/internal/hosts"
 	"github.com/venkatkrishna07/mkdev/internal/store"
 )
@@ -23,16 +28,38 @@ func newUninstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rootCA := filepath.Join(home, "ca", "rootCA.pem")
-			if _, err := os.Stat(rootCA); err == nil {
-				Step(w, "removing CA from system trust store…")
-				if err := trust.Uninstall(rootCA); err != nil {
-					return Errorf(w, "trust uninstall: %v", err)
-				}
-				Success(w, "CA removed from trust store")
-			} else {
-				Step(w, "no CA file to untrust at "+rootCA)
+
+			Step(w, "disabling daemon user-service…")
+			if err := daemon.DisableUnit(); err != nil && !errors.Is(err, daemon.ErrUnitUnsupported) {
+				Warn(w, "disable failed (continuing): "+err.Error())
 			}
+			if err := daemon.UninstallUnit(); err != nil && !errors.Is(err, daemon.ErrUnitUnsupported) {
+				Warn(w, "daemon uninstall failed (continuing): "+err.Error())
+			} else {
+				Success(w, "daemon service removed")
+			}
+
+			Step(w, "stopping menu bar (if running)…")
+			stopped, err := bar.Stop()
+			switch {
+			case err != nil:
+				Warn(w, "bar stop failed (continuing): "+err.Error())
+			case stopped:
+				Success(w, "menu bar stopped")
+			default:
+				Step(w, "menu bar was not running")
+			}
+
+			Step(w, "removing menu bar autostart…")
+			if err := bar.UninstallAutostart(); err != nil {
+				Warn(w, "bar autostart removal failed (continuing): "+err.Error())
+			} else {
+				Success(w, "menu bar autostart removed")
+			}
+
+			caDir := filepath.Join(home, "ca")
+			rootCA := filepath.Join(caDir, "rootCA.pem")
+			uninstallTrustedCA(w, caDir, rootCA)
 
 			if s, err := store.Open(filepath.Join(home, "state.db")); err == nil {
 				binPath, execErr := os.Executable()
@@ -68,4 +95,31 @@ func newUninstallCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&purge, "purge", false, "also delete config, state, certs")
 	return cmd
+}
+
+func uninstallTrustedCA(w io.Writer, caDir, rootCA string) {
+	if _, err := os.Stat(rootCA); err != nil {
+		Step(w, "no CA file to untrust at "+rootCA)
+		return
+	}
+	ca, err := cert.LoadCA(caDir)
+	if err != nil {
+		Warn(w, "load CA failed (skipping trust uninstall): "+err.Error())
+		return
+	}
+	trusted, err := trust.IsTrusted(ca.Cert)
+	if err != nil {
+		Warn(w, "trust check failed (skipping uninstall): "+err.Error())
+		return
+	}
+	if !trusted {
+		Step(w, "CA already absent from trust store")
+		return
+	}
+	Step(w, "removing CA from system trust store…")
+	if err := trust.Uninstall(rootCA); err != nil {
+		Warn(w, "trust uninstall failed (continuing): "+err.Error())
+		return
+	}
+	Success(w, "CA removed from trust store")
 }

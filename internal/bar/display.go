@@ -1,48 +1,48 @@
 package bar
 
 import (
-	"fmt"
+	"strings"
 
 	"github.com/venkatkrishna07/mkdev/internal/api"
 )
 
-func healthDot(h api.Health) string {
-	switch h {
-	case api.HealthUp:
-		return "●"
-	case api.HealthDown:
-		return "✗"
-	case api.HealthProbing:
-		return "◌"
-	default:
-		return "○"
+// routeBadges returns a " · X · Y" suffix for non-default route state.
+// Empty when the route is enabled and local-only.
+func routeBadges(r api.Route) string {
+	var b []string
+	if !r.Enabled {
+		b = append(b, "disabled")
 	}
+	if r.Share == api.ShareLAN {
+		b = append(b, "LAN")
+	}
+	if len(b) == 0 {
+		return ""
+	}
+	return "  ·  " + strings.Join(b, " · ")
 }
 
 func renderBrand(s Snapshot) string {
 	if s.Version == "" {
 		return "mkdev"
 	}
-	return "mkdev v" + s.Version
+	return "mkdev " + versionLabel(s.Version)
 }
 
-func renderStatus(s Snapshot) string {
+// versionLabel ensures exactly one leading "v".
+func versionLabel(v string) string {
+	if strings.HasPrefix(v, "v") {
+		return v
+	}
+	return "v" + v
+}
+
+func renderStatusLine(s Snapshot) string {
 	if !s.DaemonUp {
-		return "Status:  ✗ daemon down"
+		return "Daemon stopped"
 	}
-	return "Status:  ● running"
-}
-
-func renderUptime(s Snapshot) string {
-	if !s.DaemonUp || s.Uptime == "" {
-		return "Uptime:  —"
+	if s.Uptime == "" {
+		return "Running"
 	}
-	return "Uptime:  " + s.Uptime
-}
-
-func renderTraffic(s Snapshot) string {
-	if !s.DaemonUp || s.Stats.Tick.IsZero() {
-		return "Traffic: —"
-	}
-	return fmt.Sprintf("Traffic: %d total", s.Stats.Total)
+	return "Running · " + s.Uptime
 }

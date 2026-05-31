@@ -66,14 +66,15 @@ func (d *Daemon) handleGetRoute(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) handlePatchRoute(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var raw struct {
-		Target *string    `json:"target"`
-		Share  *api.Share `json:"share"`
+		Target  *string    `json:"target"`
+		Share   *api.Share `json:"share"`
+		Enabled *bool      `json:"enabled"`
 	}
 	if err := decodeJSON(r, &raw); err != nil {
 		WriteError(w, api.Error{Code: api.CodeRouteInvalidTarget, Message: "invalid JSON body: " + err.Error()})
 		return
 	}
-	out, err := d.EditRoute(name, RouteEdit{Target: raw.Target, Share: raw.Share})
+	out, err := d.EditRoute(name, RouteEdit{Target: raw.Target, Share: raw.Share, Enabled: raw.Enabled})
 	if err != nil {
 		WriteError(w, err)
 		return

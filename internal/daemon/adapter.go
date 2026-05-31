@@ -19,6 +19,7 @@ func APIFromStore(r store.Route) api.Route {
 		Share:    share,
 		Health:   api.HealthUnknown,
 		Insecure: r.Insecure,
+		Enabled:  r.Enabled,
 	}
 }
 

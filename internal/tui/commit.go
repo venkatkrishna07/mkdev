@@ -92,6 +92,20 @@ func (m rootModel) toggleShare(r store.Route) tea.Cmd {
 	}
 }
 
+func (m rootModel) toggleEnabled(r store.Route) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(m.rt.Ctx, 5*time.Second)
+		defer cancel()
+		name := trimTLD(r.Domain, r.TLD)
+		next := !r.Enabled
+		_, err := m.rt.Client.EditRoute(ctx, name, client.RouteEdit{Enabled: &next})
+		if err != nil {
+			return errMsg(daemonHint(err))
+		}
+		return refreshAfterMutate(m.rt)
+	}
+}
+
 func refreshAfterMutate(rt *Runtime) tea.Msg {
 	rs, err := rt.LoadRoutes()
 	if err != nil {

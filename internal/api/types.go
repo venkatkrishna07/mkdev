@@ -24,6 +24,7 @@ type Route struct {
 	Share    Share  `json:"share"`
 	Health   Health `json:"health"`
 	Insecure bool   `json:"insecure"`
+	Enabled  bool   `json:"enabled"`
 }
 
 type RouteStats struct {
@@ -46,4 +47,5 @@ type Status struct {
 	CertReady  bool      `json:"cert_ready"`
 	StartedAt  time.Time `json:"started_at"`
 	TLD        string    `json:"tld"`
+	ProxyPort  int       `json:"proxy_port"`
 }

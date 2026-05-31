@@ -48,6 +48,12 @@ func Install(certPath string) error {
 	return store.addCert(der)
 }
 
+// IsTrusted reports whether c is in the Windows root store. Presence in the
+// root store is the trust signal on Windows.
+func IsTrusted(c *x509.Certificate) (bool, error) {
+	return IsInstalled(c)
+}
+
 func Uninstall(certPath string) error {
 	abs, err := filepath.Abs(certPath)
 	if err != nil {

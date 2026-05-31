@@ -239,10 +239,12 @@ func (rt *Runtime) SubscribeEvents() {
 				rt.push(RoutesRefreshed{Routes: rs, Err: err})
 			case client.EventClientReconnected:
 				rt.daemonUp.Store(true)
+				rt.push(ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort)})
 				rs, err := rt.LoadRoutes()
 				rt.push(RoutesRefreshed{Routes: rs, Err: err})
 			case client.EventClientDisconnected:
 				rt.daemonUp.Store(false)
+				rt.push(ProxyState{Up: false, Err: errors.New("daemon disconnected")})
 			}
 		}
 	}()
@@ -269,7 +271,7 @@ func routesFromAPI(in []api.Route, tld string) []store.Route {
 			Domain:   r.Name + tld,
 			Target:   r.Target,
 			TLD:      tld,
-			Enabled:  true,
+			Enabled:  r.Enabled,
 			Shared:   r.Share == api.ShareLAN,
 			Insecure: r.Insecure,
 			Source:   store.SourceAdHoc,

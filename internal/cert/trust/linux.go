@@ -93,6 +93,12 @@ func Install(certPath string) error {
 	return nil
 }
 
+// IsTrusted reports whether the mkdev anchor cert is installed in the system
+// trust store. On linux, the anchor file presence is the trust signal.
+func IsTrusted(c *x509.Certificate) (bool, error) {
+	return IsInstalled(c)
+}
+
 // Uninstall removes the mkdev anchor cert from the system trust store and
 // re-runs the distro-specific update command. Requires sudo.
 func Uninstall(_ string) error {

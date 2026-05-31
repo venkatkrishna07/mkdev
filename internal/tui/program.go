@@ -157,7 +157,6 @@ type proxyStartedMsg struct{ ch <-chan ProxyState }
 // Update captures it as a transient toast in the footer area.
 type errMsg error
 
-// errExpiredMsg is delivered ~5s after an errMsg to clear the toast.
 type errExpiredMsg struct{}
 
 func (m rootModel) Init() tea.Cmd {
@@ -344,6 +343,12 @@ func (m rootModel) handleGlobalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.domains.Selected(); ok {
 			m.busy = true
 			return m, tea.Batch(m.toggleShare(r), m.spinner.Tick)
+		}
+		return m, nil
+	case key.Matches(k, m.keys.Toggle):
+		if r, ok := m.domains.Selected(); ok {
+			m.busy = true
+			return m, tea.Batch(m.toggleEnabled(r), m.spinner.Tick)
 		}
 		return m, nil
 	case key.Matches(k, m.keys.Open):

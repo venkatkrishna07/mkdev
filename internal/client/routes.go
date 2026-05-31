@@ -72,8 +72,9 @@ func (c *Client) RemoveRoute(ctx context.Context, name string) error {
 }
 
 type RouteEdit struct {
-	Target *string    `json:"target,omitempty"`
-	Share  *api.Share `json:"share,omitempty"`
+	Target  *string    `json:"target,omitempty"`
+	Share   *api.Share `json:"share,omitempty"`
+	Enabled *bool      `json:"enabled,omitempty"`
 }
 
 func (c *Client) EditRoute(ctx context.Context, name string, e RouteEdit) (api.Route, error) {

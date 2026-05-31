@@ -1,24 +1,37 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/venkatkrishna07/mkdev/internal/bar"
 	"github.com/venkatkrishna07/mkdev/internal/cert"
 	"github.com/venkatkrishna07/mkdev/internal/cert/trust"
 	"github.com/venkatkrishna07/mkdev/internal/config"
+	"github.com/venkatkrishna07/mkdev/internal/daemon"
 	"github.com/venkatkrishna07/mkdev/internal/version"
 )
 
+var installSkipService bool
+
 func newInstallCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Generate CA, trust it, prepare state dir",
-		RunE:  runInstall,
+		Short: "One-shot setup: CA + trust + daemon service + menu bar autostart",
+		Long: `Run end-to-end setup so 'mkdev add' works and the menu bar appears on
+login. Generates a local CA + trusts it, installs and enables the daemon
+user-service, registers the menu bar to launch on login, and spawns the bar
+right now if a GUI session is present.
+
+Pass --no-service to do CA + trust setup only (legacy behavior).`,
+		RunE: runInstall,
 	}
+	cmd.Flags().BoolVar(&installSkipService, "no-service", false, "skip daemon service + bar autostart")
+	return cmd
 }
 
 func runInstall(cmd *cobra.Command, _ []string) error {
@@ -81,7 +94,55 @@ func runInstall(cmd *cobra.Command, _ []string) error {
 		slog.Warn("multiple CAs in trust store", "count", len(fps))
 	}
 
+	var serviceErrs int
+	if !installSkipService {
+		_, _ = fmt.Fprintln(w)
+		serviceErrs = installServiceLayer(cmd)
+	}
+
 	_, _ = fmt.Fprintln(w)
-	Box(w, "install complete", "next:  mkdev add foo localhost:3000\n       mkdev")
+	if serviceErrs > 0 {
+		Box(w, "install complete (with warnings)", fmt.Sprintf("%d service-layer issue(s) — see log above\nnext:  mkdev add foo localhost:3000", serviceErrs))
+		return fmt.Errorf("install: %d service-layer error(s)", serviceErrs)
+	}
+	Box(w, "install complete", "next:  mkdev add foo localhost:3000")
 	return nil
+}
+
+// installServiceLayer returns the count of non-fatal errors encountered.
+// All steps run to completion regardless of individual failures.
+func installServiceLayer(cmd *cobra.Command) int {
+	w := cmd.OutOrStdout()
+	errs := 0
+
+	exe, err := os.Executable()
+	if err != nil {
+		Warn(w, "resolve own exe: "+err.Error())
+		return 1
+	}
+
+	Step(w, "installing daemon user-service…")
+	if _, err := daemon.InstallUnit(exe); err != nil && !errors.Is(err, daemon.ErrUnitUnsupported) {
+		Warn(w, "daemon install: "+err.Error())
+		errs++
+	} else if err := daemon.EnableUnit(); err != nil && !errors.Is(err, daemon.ErrUnitUnsupported) {
+		Warn(w, "daemon enable: "+err.Error())
+		errs++
+	} else {
+		Success(w, "daemon installed + running")
+	}
+
+	Step(w, "enabling menu bar autostart…")
+	if err := bar.InstallAutostart(); err != nil {
+		Warn(w, "bar autostart install failed: "+err.Error())
+		errs++
+	} else {
+		Success(w, "menu bar will launch on login")
+	}
+
+	if err := bar.SpawnIfNeeded(); err != nil {
+		Warn(w, "bar spawn failed: "+err.Error())
+		errs++
+	}
+	return errs
 }

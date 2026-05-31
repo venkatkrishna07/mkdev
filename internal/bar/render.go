@@ -4,81 +4,127 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/exec"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/venkatkrishna07/mkdev/internal/api"
 	"github.com/venkatkrishna07/mkdev/internal/browser"
 	"github.com/venkatkrishna07/mkdev/internal/client"
+	"github.com/venkatkrishna07/mkdev/internal/clipboard"
 )
 
 const clickTimeout = 5 * time.Second
 
-type routeMenu struct {
-	root  *systray.MenuItem
-	open  *systray.MenuItem
-	share *systray.MenuItem
-	stop  chan struct{}
+// getlantern/systray only appends menu items, so route rows are preallocated
+// at Init and bound/unbound as the route list changes.
+const routeSlotPool = 30
+
+const (
+	repoURL    = "https://github.com/venkatkrishna07/mkdev"
+	issuesURL  = "https://github.com/venkatkrishna07/mkdev/issues"
+	licenseURL = "https://github.com/venkatkrishna07/mkdev/blob/main/LICENSE"
+)
+
+// mu guards name/url/bound against concurrent click-loop reads vs Reconcile writes.
+type routeSlot struct {
+	root    *systray.MenuItem
+	open    *systray.MenuItem
+	copy    *systray.MenuItem
+	share   *systray.MenuItem
+	enabled *systray.MenuItem
+
+	mu    sync.Mutex
 	name  string
+	url   string
+	bound bool
+}
+
+func (s *routeSlot) snapshot() (name, url string, bound bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.name, s.url, s.bound
 }
 
 type Renderer struct {
 	c     *client.Client
-	items map[string]*routeMenu
+	slots []*routeSlot
 
-	brandItm   *systray.MenuItem
-	statusItm  *systray.MenuItem
-	uptimeItm  *systray.MenuItem
-	trafficItm *systray.MenuItem
-	routesLbl  *systray.MenuItem
-	emptyItm   *systray.MenuItem
+	brandItm  *systray.MenuItem
+	statusItm *systray.MenuItem
+	routesLbl *systray.MenuItem
+	emptyItm  *systray.MenuItem
+
+	dashItm *systray.MenuItem
+	logsItm *systray.MenuItem
+
+	aboutItm    *systray.MenuItem
+	aboutVerItm *systray.MenuItem
+	aboutGHItm  *systray.MenuItem
+	aboutBugItm *systray.MenuItem
+	aboutLicItm *systray.MenuItem
+
+	autostartItm *systray.MenuItem
 
 	toggleItm *systray.MenuItem
 	quitItm   *systray.MenuItem
 
-	footerReady bool
-	pending     bool
-	daemonUp    bool
+	pending  atomic.Bool
+	daemonUp atomic.Bool
 }
 
 func NewRenderer(c *client.Client) *Renderer {
-	return &Renderer{c: c, items: map[string]*routeMenu{}}
+	return &Renderer{c: c}
 }
 
 func (r *Renderer) Init() {
 	if len(iconRegularBytes) > 0 {
 		systray.SetTemplateIcon(iconTemplateBytes, iconRegularBytes)
 	}
-	systray.SetTooltip("mkdev — local HTTPS dev proxy")
+	setAppTooltip("mkdev — local HTTPS dev proxy")
 
 	r.brandItm = systray.AddMenuItem("mkdev", "")
 	r.brandItm.Disable()
-	systray.AddSeparator()
 
-	r.statusItm = systray.AddMenuItem("Status:  …", "daemon liveness")
+	r.statusItm = systray.AddMenuItem("…", "daemon liveness")
 	r.statusItm.Disable()
-	r.uptimeItm = systray.AddMenuItem("Uptime:  —", "")
-	r.uptimeItm.Disable()
-	r.trafficItm = systray.AddMenuItem("Traffic: —", "")
-	r.trafficItm.Disable()
 	systray.AddSeparator()
 
-	r.routesLbl = systray.AddMenuItem("Routes", "")
+	r.routesLbl = systray.AddMenuItem("ROUTES", "")
 	r.routesLbl.Disable()
-	r.emptyItm = systray.AddMenuItem("  no routes yet", "")
+	r.emptyItm = systray.AddMenuItem("no routes yet", "")
 	r.emptyItm.Disable()
-}
 
-func (r *Renderer) installFooter() {
-	if r.footerReady {
-		return
+	r.slots = make([]*routeSlot, routeSlotPool)
+	for i := range r.slots {
+		root := systray.AddMenuItem("", "")
+		root.Hide()
+		open := root.AddSubMenuItem("Open in browser", "")
+		cpy := root.AddSubMenuItem("Copy URL", "")
+		enabled := root.AddSubMenuItemCheckbox("Enabled", "Disable to stop proxying this route", true)
+		share := root.AddSubMenuItemCheckbox("Share on LAN", "Advertise via mDNS to LAN devices", false)
+		slot := &routeSlot{root: root, open: open, copy: cpy, share: share, enabled: enabled}
+		r.slots[i] = slot
+		go r.handleSlotClicks(slot)
 	}
+
+	systray.AddSeparator()
+	r.dashItm = systray.AddMenuItem("Open Dashboard", "Launch the mkdev TUI")
+	r.logsItm = systray.AddMenuItem("Open Logs Folder", "Open ~/.mkdev/logs")
+	r.autostartItm = systray.AddMenuItemCheckbox("Start on Login", "Launch mkdev menu bar at login", AutostartEnabled())
+
+	systray.AddSeparator()
+	r.aboutItm = systray.AddMenuItem("About mkdev", "")
+	r.aboutVerItm = r.aboutItm.AddSubMenuItem("Version —", "")
+	r.aboutVerItm.Disable()
+	r.aboutGHItm = r.aboutItm.AddSubMenuItem("View on GitHub", repoURL)
+	r.aboutBugItm = r.aboutItm.AddSubMenuItem("Report an Issue", issuesURL)
+	r.aboutLicItm = r.aboutItm.AddSubMenuItem("License", licenseURL)
+
 	systray.AddSeparator()
 	r.toggleItm = systray.AddMenuItem("Stop daemon", "")
 	r.quitItm = systray.AddMenuItem("Quit", "Close the menu bar; daemon keeps running")
-	r.footerReady = true
 	go r.handleFooter()
 }
 
@@ -86,7 +132,7 @@ func (r *Renderer) updateToggle(daemonUp bool) {
 	if r.toggleItm == nil {
 		return
 	}
-	if r.pending {
+	if r.pending.Load() {
 		r.toggleItm.SetTitle("Working…")
 		r.toggleItm.Disable()
 		return
@@ -101,89 +147,176 @@ func (r *Renderer) updateToggle(daemonUp bool) {
 	}
 }
 
+func (r *Renderer) updateAbout(snap Snapshot) {
+	if r.aboutVerItm == nil {
+		return
+	}
+	title := "Version —"
+	if snap.Version != "" {
+		title = "Version " + versionLabel(snap.Version)
+	}
+	r.aboutVerItm.SetTitle(title)
+}
+
 func (r *Renderer) Reconcile(snap Snapshot) {
-	r.daemonUp = snap.DaemonUp
+	r.daemonUp.Store(snap.DaemonUp)
 	r.brandItm.SetTitle(renderBrand(snap))
-	r.statusItm.SetTitle(renderStatus(snap))
-	r.uptimeItm.SetTitle(renderUptime(snap))
-	r.trafficItm.SetTitle(renderTraffic(snap))
+	r.statusItm.SetTitle(renderStatusLine(snap))
+	statusHealth := api.HealthDown
+	if snap.DaemonUp {
+		statusHealth = api.HealthUp
+	}
+	r.statusItm.SetIcon(iconForHealth(statusHealth))
 
 	if len(snap.Routes) == 0 {
 		r.emptyItm.Show()
 	} else {
 		r.emptyItm.Hide()
 	}
+	r.routesLbl.SetTitle(fmt.Sprintf("ROUTES (%d)", len(snap.Routes)))
 
-	r.routesLbl.SetTitle(fmt.Sprintf("Routes (%d)", len(snap.Routes)))
+	r.bindRoutes(snap)
+	r.updateToggle(snap.DaemonUp)
+	r.updateAbout(snap)
+}
 
-	seen := map[string]struct{}{}
+func (r *Renderer) bindRoutes(snap Snapshot) {
+	byName := map[string]*routeSlot{}
+	for _, s := range r.slots {
+		name, _, bound := s.snapshot()
+		if bound {
+			byName[name] = s
+		}
+	}
+
+	used := map[*routeSlot]struct{}{}
 	for _, route := range snap.Routes {
-		seen[route.Name] = struct{}{}
 		domain := route.Name + snap.TLD
 		health := snap.Health[domain]
-		title := fmt.Sprintf("  %s  %s  →  %s", healthDot(health), domain, route.Target)
-		if item, ok := r.items[route.Name]; ok {
-			item.root.SetTitle(title)
-			item.root.Show()
-			updateShareItem(item.share, route.Share)
+		title := fmt.Sprintf("%s  →  %s%s", domain, route.Target, routeBadges(route))
+		url := buildRouteURL(domain, snap.ProxyPort)
+
+		s := byName[route.Name]
+		if s == nil {
+			s = r.freeSlot(used)
+			if s == nil {
+				slog.Warn("bar: route slot pool exhausted", "limit", routeSlotPool)
+				break
+			}
+		}
+		used[s] = struct{}{}
+
+		s.mu.Lock()
+		s.name = route.Name
+		s.url = url
+		s.bound = true
+		s.mu.Unlock()
+
+		s.root.SetTitle(title)
+		s.root.SetIcon(iconForHealth(health))
+		s.root.SetTooltip(url)
+		s.open.SetTooltip(url)
+		s.copy.SetTooltip(url)
+		updateBoolItem(s.share, route.Share == api.ShareLAN)
+		updateBoolItem(s.enabled, route.Enabled)
+		s.root.Show()
+	}
+
+	for _, s := range r.slots {
+		if _, ok := used[s]; ok {
 			continue
 		}
-		r.items[route.Name] = r.addRoute(route, domain, title)
+		s.mu.Lock()
+		s.bound = false
+		s.name = ""
+		s.url = ""
+		s.mu.Unlock()
+		s.root.Hide()
 	}
+}
 
-	for name, item := range r.items {
-		if _, ok := seen[name]; ok {
+func (r *Renderer) freeSlot(used map[*routeSlot]struct{}) *routeSlot {
+	for _, s := range r.slots {
+		if _, ok := used[s]; ok {
 			continue
 		}
-		item.root.Hide()
-		close(item.stop)
-		delete(r.items, name)
+		_, _, bound := s.snapshot()
+		if bound {
+			continue
+		}
+		return s
 	}
-
-	r.installFooter()
-	r.updateToggle(snap.DaemonUp)
+	return nil
 }
 
-func (r *Renderer) addRoute(route api.Route, domain, title string) *routeMenu {
-	root := systray.AddMenuItem(title, "")
-	openSub := root.AddSubMenuItem("Open in browser", "https://"+domain)
-	shareSub := root.AddSubMenuItemCheckbox("Share on LAN", "Advertise via mDNS to LAN devices", route.Share == api.ShareLAN)
-	rm := &routeMenu{
-		root:  root,
-		open:  openSub,
-		share: shareSub,
-		stop:  make(chan struct{}),
-		name:  route.Name,
+func buildRouteURL(domain string, proxyPort int) string {
+	if proxyPort == 0 || proxyPort == 443 {
+		return "https://" + domain
 	}
-	go r.handleRouteClicks(rm, domain)
-	return rm
+	return fmt.Sprintf("https://%s:%d", domain, proxyPort)
 }
 
-func (r *Renderer) handleRouteClicks(rm *routeMenu, domain string) {
+func (r *Renderer) handleSlotClicks(s *routeSlot) {
 	for {
 		select {
-		case <-rm.stop:
-			return
-		case <-rm.root.ClickedCh:
-			openURL("https://" + domain)
-		case <-rm.open.ClickedCh:
-			openURL("https://" + domain)
-		case <-rm.share.ClickedCh:
-			enabled := !rm.share.Checked()
-			ctx, cancel := context.WithTimeout(context.Background(), clickTimeout)
-			_, err := r.c.ToggleShare(ctx, rm.name, enabled)
-			cancel()
-			if err != nil {
-				slog.Warn("bar: ToggleShare failed", "name", rm.name, "err", err)
-				continue
-			}
-			if enabled {
-				rm.share.Check()
-			} else {
-				rm.share.Uncheck()
-			}
+		case <-s.root.ClickedCh:
+			r.slotOpenURL(s)
+		case <-s.open.ClickedCh:
+			r.slotOpenURL(s)
+		case <-s.copy.ClickedCh:
+			r.slotCopyURL(s)
+		case <-s.share.ClickedCh:
+			r.slotToggleShare(s)
+		case <-s.enabled.ClickedCh:
+			r.slotToggleEnabled(s)
 		}
 	}
+}
+
+func (r *Renderer) slotOpenURL(s *routeSlot) {
+	if _, url, bound := s.snapshot(); bound {
+		openURL(url)
+	}
+}
+
+func (r *Renderer) slotCopyURL(s *routeSlot) {
+	_, url, bound := s.snapshot()
+	if !bound {
+		return
+	}
+	if err := clipboard.Copy(url); err != nil {
+		slog.Warn("bar: copy URL failed", "url", url, "err", err)
+	}
+}
+
+func (r *Renderer) slotToggleShare(s *routeSlot) {
+	name, _, bound := s.snapshot()
+	if !bound {
+		return
+	}
+	enabled := !s.share.Checked()
+	ctx, cancel := context.WithTimeout(context.Background(), clickTimeout)
+	defer cancel()
+	if _, err := r.c.ToggleShare(ctx, name, enabled); err != nil {
+		slog.Warn("bar: ToggleShare failed", "name", name, "err", err)
+		return
+	}
+	updateBoolItem(s.share, enabled)
+}
+
+func (r *Renderer) slotToggleEnabled(s *routeSlot) {
+	name, _, bound := s.snapshot()
+	if !bound {
+		return
+	}
+	newEnabled := !s.enabled.Checked()
+	ctx, cancel := context.WithTimeout(context.Background(), clickTimeout)
+	defer cancel()
+	if _, err := r.c.EditRoute(ctx, name, client.RouteEdit{Enabled: &newEnabled}); err != nil {
+		slog.Warn("bar: toggle enabled failed", "name", name, "err", err)
+		return
+	}
+	updateBoolItem(s.enabled, newEnabled)
 }
 
 func (r *Renderer) handleFooter() {
@@ -194,21 +327,59 @@ func (r *Renderer) handleFooter() {
 			return
 		case <-r.toggleItm.ClickedCh:
 			r.onToggleClick()
+		case <-r.dashItm.ClickedCh:
+			if err := launchInTerminal("tui"); err != nil {
+				slog.Warn("bar: launch dashboard failed", "err", err)
+			}
+		case <-r.logsItm.ClickedCh:
+			r.openLogs()
+		case <-r.aboutGHItm.ClickedCh:
+			openURL(repoURL)
+		case <-r.aboutBugItm.ClickedCh:
+			openURL(issuesURL)
+		case <-r.aboutLicItm.ClickedCh:
+			openURL(licenseURL)
+		case <-r.autostartItm.ClickedCh:
+			r.onAutostartToggle()
 		}
 	}
 }
 
-func (r *Renderer) onToggleClick() {
-	if r.pending {
+func (r *Renderer) onAutostartToggle() {
+	if r.autostartItm.Checked() {
+		if err := UninstallAutostart(); err != nil {
+			slog.Warn("bar: uninstall autostart failed", "err", err)
+			return
+		}
+		r.autostartItm.Uncheck()
 		return
 	}
-	wasUp := r.daemonUp
-	r.pending = true
+	if err := InstallAutostart(); err != nil {
+		slog.Warn("bar: install autostart failed", "err", err)
+		return
+	}
+	r.autostartItm.Check()
+}
+
+func (r *Renderer) openLogs() {
+	dir, err := logsDir()
+	if err != nil {
+		slog.Warn("bar: resolve logs dir failed", "err", err)
+		return
+	}
+	if err := browser.Open(dir); err != nil {
+		slog.Warn("bar: open logs dir failed", "dir", dir, "err", err)
+	}
+}
+
+func (r *Renderer) onToggleClick() {
+	if !r.pending.CompareAndSwap(false, true) {
+		return
+	}
+	wasUp := r.daemonUp.Load()
 	r.updateToggle(wasUp)
 	go func() {
-		defer func() {
-			r.pending = false
-		}()
+		defer r.pending.Store(false)
 		if wasUp {
 			ctx, cancel := context.WithTimeout(context.Background(), clickTimeout)
 			defer cancel()
@@ -219,7 +390,7 @@ func (r *Renderer) onToggleClick() {
 			slog.Info("bar: daemon shutdown requested")
 			return
 		}
-		if err := startDaemonDetached(); err != nil {
+		if err := spawnDetached("daemon", "serve"); err != nil {
 			slog.Warn("bar: start daemon failed", "err", err)
 		} else {
 			slog.Info("bar: daemon start requested")
@@ -227,29 +398,10 @@ func (r *Renderer) onToggleClick() {
 	}()
 }
 
-func startDaemonDetached() error {
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve exe: %w", err)
-	}
-	cmd := exec.Command(exe, "daemon", "serve")
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	detachProcess(cmd)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("spawn: %w", err)
-	}
-	_ = cmd.Process.Release()
-	return nil
-}
-
-func updateShareItem(item *systray.MenuItem, share api.Share) {
-	if share == api.ShareLAN {
-		if !item.Checked() {
-			item.Check()
-		}
-	} else if item.Checked() {
+func updateBoolItem(item *systray.MenuItem, on bool) {
+	if on && !item.Checked() {
+		item.Check()
+	} else if !on && item.Checked() {
 		item.Uncheck()
 	}
 }
