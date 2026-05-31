@@ -2,6 +2,7 @@ package bar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/browser"
 	"github.com/venkatkrishna07/mkdev/internal/client"
 	"github.com/venkatkrishna07/mkdev/internal/clipboard"
+	"github.com/venkatkrishna07/mkdev/internal/daemon"
 )
 
 const clickTimeout = 5 * time.Second
@@ -381,21 +383,47 @@ func (r *Renderer) onToggleClick() {
 	go func() {
 		defer r.pending.Store(false)
 		if wasUp {
-			ctx, cancel := context.WithTimeout(context.Background(), clickTimeout)
-			defer cancel()
-			if err := r.c.Shutdown(ctx); err != nil {
-				slog.Warn("bar: shutdown daemon failed", "err", err)
-				return
-			}
-			slog.Info("bar: daemon shutdown requested")
+			r.stopDaemon()
 			return
 		}
-		if err := spawnDetached("daemon", "serve"); err != nil {
-			slog.Warn("bar: start daemon failed", "err", err)
-		} else {
-			slog.Info("bar: daemon start requested")
-		}
+		r.startDaemon()
 	}()
+}
+
+// stopDaemon attempts to stop the daemon both via the OS supervisor (so
+// KeepAlive=true in the LaunchAgent doesn't respawn it) and via the HTTP
+// shutdown endpoint (covers the case where the daemon was started manually
+// without an installed service).
+func (r *Renderer) stopDaemon() {
+	disableErr := daemon.DisableUnit()
+	if disableErr != nil && !errors.Is(disableErr, daemon.ErrUnitUnsupported) {
+		slog.Warn("bar: disable daemon unit failed", "err", disableErr)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), clickTimeout)
+	defer cancel()
+	if err := r.c.Shutdown(ctx); err != nil && !errors.Is(err, client.ErrDaemonDown) {
+		slog.Warn("bar: shutdown daemon failed", "err", err)
+		return
+	}
+	slog.Info("bar: daemon stop requested")
+}
+
+// startDaemon prefers the OS supervisor (`launchctl enable` / systemd unit
+// start) so the daemon comes back up the same way the user originally set it
+// up. Falls back to spawning the binary directly when no service is
+// installed.
+func (r *Renderer) startDaemon() {
+	if err := daemon.EnableUnit(); err == nil {
+		slog.Info("bar: daemon enabled via supervisor")
+		return
+	} else if !errors.Is(err, daemon.ErrUnitUnsupported) {
+		slog.Warn("bar: enable daemon unit failed, falling back to spawn", "err", err)
+	}
+	if err := spawnDetached("daemon", "serve"); err != nil {
+		slog.Warn("bar: start daemon failed", "err", err)
+		return
+	}
+	slog.Info("bar: daemon start requested")
 }
 
 func updateBoolItem(item *systray.MenuItem, on bool) {
