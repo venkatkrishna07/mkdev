@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/getlantern/systray"
+	"fyne.io/systray"
 	"github.com/venkatkrishna07/mkdev/internal/api"
 	"github.com/venkatkrishna07/mkdev/internal/browser"
 	"github.com/venkatkrishna07/mkdev/internal/client"
@@ -19,7 +19,7 @@ import (
 
 const clickTimeout = 5 * time.Second
 
-// getlantern/systray only appends menu items, so route rows are preallocated
+// systray only appends menu items, so route rows are preallocated
 // at Init and bound/unbound as the route list changes.
 const routeSlotPool = 30
 

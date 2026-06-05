@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/cert/trust"
 	"github.com/venkatkrishna07/mkdev/internal/config"
 	"github.com/venkatkrishna07/mkdev/internal/daemon"
+	"github.com/venkatkrishna07/mkdev/internal/hosts"
+	"github.com/venkatkrishna07/mkdev/internal/store"
 	"github.com/venkatkrishna07/mkdev/internal/version"
 )
 
@@ -94,6 +97,9 @@ func runInstall(cmd *cobra.Command, _ []string) error {
 		slog.Warn("multiple CAs in trust store", "count", len(fps))
 	}
 
+	_, _ = fmt.Fprintln(w)
+	syncHostsFromStore(w, home)
+
 	var serviceErrs int
 	if !installSkipService {
 		_, _ = fmt.Fprintln(w)
@@ -109,8 +115,47 @@ func runInstall(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// installServiceLayer returns the count of non-fatal errors encountered.
-// All steps run to completion regardless of individual failures.
+func syncHostsFromStore(w io.Writer, home string) {
+	dbPath := filepath.Join(home, "state.db")
+	if _, err := os.Stat(dbPath); err != nil {
+		return
+	}
+	s, err := store.Open(dbPath)
+	if err != nil {
+		Warn(w, "skip hosts sync (state.db open failed): "+err.Error())
+		return
+	}
+	defer func() { _ = s.Close() }()
+	routes, err := s.ListRoutes()
+	if err != nil {
+		Warn(w, "skip hosts sync (list routes failed): "+err.Error())
+		return
+	}
+	if len(routes) == 0 {
+		return
+	}
+	binPath, err := os.Executable()
+	if err != nil {
+		Warn(w, "skip hosts sync (resolve exe failed): "+err.Error())
+		return
+	}
+	editor := hosts.NewEditor(binPath)
+	added := 0
+	for _, rt := range routes {
+		if !rt.Enabled {
+			continue
+		}
+		if err := editor.Add(rt.Domain); err != nil {
+			slog.Warn("install: hosts re-add failed", "domain", rt.Domain, "err", err)
+			continue
+		}
+		added++
+	}
+	if added > 0 {
+		Step(w, fmt.Sprintf("re-asserted %d /etc/hosts entries", added))
+	}
+}
+
 func installServiceLayer(cmd *cobra.Command) int {
 	w := cmd.OutOrStdout()
 	errs := 0

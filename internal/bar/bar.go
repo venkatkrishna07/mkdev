@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/getlantern/systray"
+	"fyne.io/systray"
 	"github.com/venkatkrishna07/mkdev/internal/client"
 )
 

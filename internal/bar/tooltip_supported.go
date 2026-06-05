@@ -2,6 +2,6 @@
 
 package bar
 
-import "github.com/getlantern/systray"
+import "fyne.io/systray"
 
 func setAppTooltip(s string) { systray.SetTooltip(s) }

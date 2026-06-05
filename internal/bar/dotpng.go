@@ -18,7 +18,7 @@ var (
 	colorOff     = color.RGBA{R: 0xAE, G: 0xAE, B: 0xB2, A: 0xFF}
 )
 
-// getlantern/systray hardcodes NSImage size to 16x16 pt, so the source PNG is
+// systray hardcodes NSImage size to 16x16 pt, so the source PNG is
 // downscaled regardless of pixel dimensions. Trick: render a small dot inside
 // a larger transparent canvas — the dot then occupies only a fraction of the
 // 16pt menu cell. With canvasPx=32 and dotDiameterPx=14, displayed dot ≈ 7pt.
