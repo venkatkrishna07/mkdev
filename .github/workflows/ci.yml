@@ -33,7 +33,13 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: go vet ./...
       - name: test
-        run: go test -race -count=1 -timeout 180s -vet=off ./...
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            go test -count=1 -timeout 180s -vet=off -p 2 ./...
+          else
+            go test -race -count=1 -timeout 180s -vet=off ./...
+          fi
       - name: build
         run: go build -trimpath -o mkdev_bin ./cmd/mkdev
 
