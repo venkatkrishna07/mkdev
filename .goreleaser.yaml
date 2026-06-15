@@ -10,7 +10,17 @@ builds:
     main: ./cmd/mkdev
     binary: mkdev
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
+      - >-
+        {{- if and (eq .Os "darwin") (eq .Arch "amd64") }}CC=o64-clang{{ end }}
+      - >-
+        {{- if and (eq .Os "darwin") (eq .Arch "arm64") }}CC=oa64-clang{{ end }}
+      - >-
+        {{- if and (eq .Os "linux") (eq .Arch "amd64") }}CC=x86_64-linux-gnu-gcc{{ end }}
+      - >-
+        {{- if and (eq .Os "linux") (eq .Arch "arm64") }}CC=aarch64-linux-gnu-gcc{{ end }}
+      - >-
+        {{- if and (eq .Os "windows") (eq .Arch "amd64") }}CGO_ENABLED=0{{ end }}
     goos:
       - darwin
       - linux
