@@ -50,6 +50,7 @@ func drawDot(c color.Color) []byte {
 	radius := float64(dotDiameterPx) / 2
 	r2 := radius * radius
 	r4, g4, b4, _ := c.RGBA()
+	//nolint:gosec // RGBA() returns 16-bit channels; >>8 fits uint8
 	cr, cg, cb := uint8(r4>>8), uint8(g4>>8), uint8(b4>>8)
 	inv := 1.0 / float64(aaSamples)
 
@@ -73,9 +74,9 @@ func drawDot(c color.Color) []byte {
 			}
 			alpha := uint8(hits * 255 / (aaSamples * aaSamples))
 			img.SetRGBA(x, y, color.RGBA{
-				R: uint8(uint16(cr) * uint16(alpha) / 255),
-				G: uint8(uint16(cg) * uint16(alpha) / 255),
-				B: uint8(uint16(cb) * uint16(alpha) / 255),
+				R: uint8(uint16(cr) * uint16(alpha) / 255), //nolint:gosec // divisor 255 keeps result in uint8 range
+				G: uint8(uint16(cg) * uint16(alpha) / 255), //nolint:gosec // divisor 255 keeps result in uint8 range
+				B: uint8(uint16(cb) * uint16(alpha) / 255), //nolint:gosec // divisor 255 keeps result in uint8 range
 				A: alpha,
 			})
 		}

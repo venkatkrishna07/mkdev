@@ -114,7 +114,8 @@ func runInstall(cmd *cobra.Command, _ []string) error {
 
 	_, _ = fmt.Fprintln(w)
 	if serviceErrs > 0 {
-		Box(w, "install complete (with warnings)", fmt.Sprintf("%d service-layer issue(s) — see log above\nnext:  mkdev add foo localhost:3000", serviceErrs))
+		body := fmt.Sprintf("%d service-layer issue(s) — see log above\nnext:  mkdev add foo localhost:3000", serviceErrs)
+		Box(w, "install complete (with warnings)", body)
 		return fmt.Errorf("install: %d service-layer error(s)", serviceErrs)
 	}
 	Box(w, "install complete", "next:  mkdev add foo localhost:3000")

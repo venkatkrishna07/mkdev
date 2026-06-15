@@ -2,7 +2,7 @@ module github.com/venkatkrishna07/mkdev
 
 go 1.25.0
 
-toolchain go1.26.3
+toolchain go1.26.4
 
 require (
 	fyne.io/systray v1.12.2

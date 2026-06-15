@@ -22,7 +22,7 @@ func acquireLock() (release func(), err error) {
 	lockPath := filepath.Join(home, "bar.lock")
 
 	for range 2 {
-		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // lockPath rooted under homeDir()
 		if err == nil {
 			if _, werr := f.WriteString(strconv.Itoa(os.Getpid())); werr != nil {
 				_ = f.Close()

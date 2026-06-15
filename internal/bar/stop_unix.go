@@ -22,6 +22,7 @@ func terminateProcess(pid int) error {
 // `mkdev bar`. Reads via `ps -o command=` (works on darwin + linux). False
 // (deny) on lookup failure — safer than risking SIGTERM on a reused PID.
 func processIsMkdevBar(pid int) bool {
+	//nolint:gosec // pid is int from PID file, formatted via strconv.Itoa
 	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return false
