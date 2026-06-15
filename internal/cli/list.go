@@ -1,14 +1,16 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"text/tabwriter"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
-	"github.com/venkatkrishna07/mkdev/internal/store"
+	"github.com/venkatkrishna07/mkdev/internal/api"
+	"github.com/venkatkrishna07/mkdev/internal/client"
 )
 
 func newListCmd() *cobra.Command {
@@ -18,59 +20,72 @@ func newListCmd() *cobra.Command {
 		Aliases: []string{"ls"},
 		Short:   "List domain mappings",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			home, err := HomeDir()
+			c, err := client.New(client.Options{})
 			if err != nil {
 				return err
 			}
-			s, err := store.Open(filepath.Join(home, "state.db"))
+			defer func() { _ = c.Close() }()
+
+			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+			defer cancel()
+
+			st, err := c.Status(ctx)
 			if err != nil {
-				return err
+				return daemonError(err)
 			}
-			defer func() { _ = s.Close() }()
-			rs, err := s.ListRoutes()
+			rs, err := c.Routes(ctx)
 			if err != nil {
-				return err
+				return daemonError(err)
 			}
+
 			w := cmd.OutOrStdout()
 			if asJSON {
 				return json.NewEncoder(w).Encode(rs)
 			}
+
+			tld := st.TLD
+			if tld == "" {
+				tld = ".local"
+			}
+
 			if len(rs) == 0 {
-				// Header still emitted so machine consumers / tests can detect empty state.
 				if !styled() {
-					_, _ = fmt.Fprintln(w, "DOMAIN\tTARGET\tENABLED\tSOURCE")
+					_, _ = fmt.Fprintln(w, "DOMAIN\tTARGET\tSHARE\tHEALTH")
 					return nil
 				}
 				Dim(w, "no routes — add one with `mkdev add <name> <host:port>`")
 				return nil
 			}
+
 			tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 			headerStyle := lipgloss.NewStyle().Bold(true).Foreground(infoColor)
 			domainStyle := lipgloss.NewStyle().Bold(true)
-			okStyle := lipgloss.NewStyle().Foreground(okColor)
-			offStyle := lipgloss.NewStyle().Foreground(dimColor)
+			lanStyle := lipgloss.NewStyle().Foreground(okColor)
+			dimStyle := lipgloss.NewStyle().Foreground(dimColor)
 
 			if styled() {
 				_, _ = fmt.Fprintln(tw,
 					headerStyle.Render("DOMAIN")+"\t"+
 						headerStyle.Render("TARGET")+"\t"+
-						headerStyle.Render("STATUS")+"\t"+
-						headerStyle.Render("SOURCE"))
+						headerStyle.Render("SHARE")+"\t"+
+						headerStyle.Render("HEALTH"))
 			} else {
-				_, _ = fmt.Fprintln(tw, "DOMAIN\tTARGET\tENABLED\tSOURCE")
+				_, _ = fmt.Fprintln(tw, "DOMAIN\tTARGET\tSHARE\tHEALTH")
 			}
 			for _, r := range rs {
-				status := "✓ up"
-				st := okStyle
-				if !r.Enabled {
-					status = "⊘ off"
-					st = offStyle
-				}
+				domain := r.Name + tld
+				share := string(r.Share)
+				health := string(r.Health)
 				if styled() {
+					shareR := dimStyle.Render(share)
+					if r.Share == api.ShareLAN {
+						shareR = lanStyle.Render(share)
+					}
 					_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-						domainStyle.Render(r.Domain), r.Target, st.Render(status), r.Source)
+						domainStyle.Render(domain), r.Target, shareR, health)
 				} else {
-					_, _ = fmt.Fprintf(tw, "%s\t%s\t%v\t%s\n", r.Domain, r.Target, r.Enabled, r.Source)
+					_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+						domain, r.Target, share, health)
 				}
 			}
 			return tw.Flush()

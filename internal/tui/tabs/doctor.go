@@ -35,18 +35,22 @@ type CheckResult struct {
 	Detail string
 }
 
+// RoutesFunc returns the current route set (typically backed by a daemon API call).
+type RoutesFunc func() ([]store.Route, error)
+
 // Doctor is the Doctor tab.
 type Doctor struct {
 	th      styles.Theme
 	home    string
-	store   *store.Store
+	routes  RoutesFunc
 	results []CheckResult
 }
 
 // NewDoctor constructs a Doctor tab against home (e.g. ~/.mkdev) and runs
-// the initial battery of checks.
-func NewDoctor(th styles.Theme, home string, st *store.Store) Doctor {
-	d := Doctor{th: th, home: home, store: st}
+// the initial battery of checks. routes is the source of truth for the
+// current route set; pass a closure that calls the daemon client.
+func NewDoctor(th styles.Theme, home string, routes RoutesFunc) Doctor {
+	d := Doctor{th: th, home: home, routes: routes}
 	d.runChecks()
 	return d
 }
@@ -158,10 +162,10 @@ func (d Doctor) checkLANIP() CheckResult {
 }
 
 func (d Doctor) checkSharedRoutes() CheckResult {
-	if d.store == nil {
-		return CheckResult{"shared routes", CheckWarn, "store handle unavailable"}
+	if d.routes == nil {
+		return CheckResult{"shared routes", CheckWarn, "routes source unavailable"}
 	}
-	routes, err := d.store.ListRoutes()
+	routes, err := d.routes()
 	if err != nil {
 		return CheckResult{"shared routes", CheckWarn, err.Error()}
 	}

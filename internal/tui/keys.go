@@ -7,8 +7,8 @@ type KeyMap struct {
 	Add     key.Binding
 	Edit    key.Binding
 	Delete  key.Binding
-	Toggle  key.Binding
 	Share   key.Binding
+	Toggle  key.Binding
 	Open    key.Binding
 	Up      key.Binding
 	Down    key.Binding
@@ -26,13 +26,13 @@ type KeyMap struct {
 
 // ShortHelp returns the single-line help bindings shown in the footer.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Add, k.Edit, k.Delete, k.Toggle, k.Share, k.Open, k.Help, k.Quit}
+	return []key.Binding{k.Add, k.Edit, k.Delete, k.Share, k.Toggle, k.Open, k.Help, k.Quit}
 }
 
 // FullHelp returns the expanded help-screen bindings grouped by row.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Open, k.Toggle, k.Share},
+		{k.Up, k.Down, k.Open, k.Share, k.Toggle},
 		{k.Add, k.Edit, k.Delete},
 		{k.NextTab, k.PrevTab},
 		{k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.Tab5, k.Tab6},
@@ -45,8 +45,8 @@ var DefaultKeyMap = KeyMap{
 	Add:     key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 	Edit:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 	Delete:  key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-	Toggle:  key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "toggle")),
 	Share:   key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "share LAN")),
+	Toggle:  key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "toggle enabled")),
 	Open:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("↵", "open")),
 	Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
 	Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/venkatkrishna07/mkdev/internal/safeexec"
@@ -32,7 +33,6 @@ func Install(certPath string) error {
 	if err != nil {
 		return fmt.Errorf("trust: abs path: %w", err)
 	}
-	// abs is filepath.Abs of operator-supplied cert path.
 	cmd := exec.Command("sudo", "security", "add-trusted-cert", //nolint:gosec
 		"-d", "-r", "trustRoot",
 		"-p", "ssl", "-p", "basic",
@@ -58,7 +58,6 @@ func Uninstall(certPath string) error {
 	if err != nil {
 		return fmt.Errorf("trust: abs path: %w", err)
 	}
-	// abs is filepath.Abs of operator-supplied cert path.
 	cmd := exec.Command("sudo", "security", "remove-trusted-cert", "-d", abs) //nolint:gosec
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -93,6 +92,38 @@ func ListMkdevCerts() ([]string, error) {
 	}
 	return fps, nil
 }
+
+// IsTrusted reports whether c has trust settings in the macOS admin domain
+// (where Install places certs via `-d`).
+func IsTrusted(c *x509.Certificate) (bool, error) {
+	if c == nil {
+		return false, errors.New("trust: nil cert")
+	}
+	sum := sha1.Sum(c.Raw) //nolint:gosec
+	want := strings.ToUpper(hex.EncodeToString(sum[:]))
+	cmd := exec.Command("security", "dump-trust-settings", "-d")
+	out, err := cmd.CombinedOutput()
+	matches := fingerprintRE.FindAllString(strings.ToUpper(string(out)), -1)
+	if err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			return false, fmt.Errorf("trust: dump-trust-settings: %w", err)
+		}
+		if len(matches) == 0 {
+			return false, nil
+		}
+	} else if len(matches) == 0 && len(strings.TrimSpace(string(out))) > 0 {
+		return false, errors.New("trust: dump-trust-settings format unrecognized")
+	}
+	for _, m := range matches {
+		if strings.ReplaceAll(m, " ", "") == want {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+var fingerprintRE = regexp.MustCompile(`\b[0-9A-Fa-f]{40}\b`)
 
 // IsInstalled returns true if a cert with the same SHA1 fingerprint as c
 // is present in the macOS system keychain.

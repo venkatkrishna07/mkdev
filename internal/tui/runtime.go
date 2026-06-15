@@ -2,49 +2,60 @@ package tui
 
 import (
 	"context"
-	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
-	"net"
-	"net/http"
 	"path/filepath"
-	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/venkatkrishna07/mkdev/internal/api"
 	"github.com/venkatkrishna07/mkdev/internal/cert"
+	"github.com/venkatkrishna07/mkdev/internal/client"
 	"github.com/venkatkrishna07/mkdev/internal/config"
 	mdnspkg "github.com/venkatkrishna07/mkdev/internal/mdns"
-	"github.com/venkatkrishna07/mkdev/internal/proxy"
 	"github.com/venkatkrishna07/mkdev/internal/proxy/prober"
 	"github.com/venkatkrishna07/mkdev/internal/store"
 )
 
-// Runtime is the shared state of the TUI.
+var jsonUnmarshal = json.Unmarshal
+
+// Runtime is the shared state of the TUI. After the daemon migration the
+// runtime no longer owns the proxy, store, mdns, or cert issuer — those live
+// in the daemon process. The TUI uses Client for reads/writes; live stats
+// and route changes arrive over the SSE event stream.
 type Runtime struct {
-	Ctx     context.Context
-	Cancel  context.CancelFunc
-	Home    string
-	Cfg     config.Config
-	Router  *proxy.Router
-	Issuer  *cert.Issuer
-	Stats   *proxy.Stats
-	Store   *store.Store
-	Prober  *prober.Prober
-	mdnsPub atomic.Pointer[mdnspkg.Publisher]
+	Ctx    context.Context
+	Cancel context.CancelFunc
+	Home   string
+	Cfg    config.Config
+	Client *client.Client
+	CA     *x509.Certificate // loaded from disk for display; may be nil
+
+	mu        sync.Mutex
+	routes    []store.Route
+	tld       string
+	liveStats api.Stats
+	send      func(tea.Msg)
+
+	daemonUp atomic.Bool
 }
 
 // LANState is a snapshot of LAN-share visibility for dashboard rendering.
+// Advertising reflects daemon liveness (the daemon owns mDNS).
 type LANState struct {
 	IP          string
 	Advertising bool
 	SharedCount int
 }
 
-// NewRuntime loads config + CA and prepares a Router. It does NOT start the
-// TLS proxy yet — call StartProxy after the TUI program is constructed.
+// NewRuntime resolves config, opens a client to the daemon, and constructs
+// nil-safe placeholders for Stats/Prober used by the dashboard. The CA is
+// loaded read-only for display; absence is non-fatal in the TUI (daemon
+// reports its own cert state via /v1/status).
 func NewRuntime(ctx context.Context, home string) (*Runtime, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	cfg, err := config.Load(filepath.Join(home, "config.toml"))
@@ -52,147 +63,219 @@ func NewRuntime(ctx context.Context, home string) (*Runtime, error) {
 		cancel()
 		return nil, err
 	}
-	ca, err := cert.LoadCA(filepath.Join(home, "ca"))
+	c, err := client.New(client.Options{})
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("CA not found — run `mkdev install` first: %w", err)
+		return nil, fmt.Errorf("client: %w", err)
 	}
-	st, err := store.Open(filepath.Join(home, "state.db"))
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("open store: %w", err)
+	rt := &Runtime{
+		Ctx:    ctx,
+		Cancel: cancel,
+		Home:   home,
+		Cfg:    cfg,
+		Client: c,
+		tld:    cfg.TLD,
 	}
-	r := proxy.NewRouter()
-	is := cert.NewIssuer(ca, r.Has)
-	stats := proxy.NewStats()
-	pr := prober.New(st.ListRoutes, 2*time.Second, 500*time.Millisecond)
-	return &Runtime{Ctx: ctx, Cancel: cancel, Home: home, Cfg: cfg, Router: r, Issuer: is, Stats: stats, Store: st, Prober: pr}, nil
+	if ca, err := cert.LoadCA(filepath.Join(home, "ca")); err == nil {
+		rt.CA = ca.Cert
+	}
+	return rt, nil
 }
 
-// Close releases long-lived resources held by the runtime (currently the
-// shared bbolt store handle). Safe to call multiple times. Cancel should be
-// called first so background goroutines stop touching the store.
+// Close releases client resources. Safe to call multiple times.
 func (rt *Runtime) Close() error {
-	if rt.Store != nil {
-		return rt.Store.Close()
+	if rt.Client != nil {
+		err := rt.Client.Close()
+		rt.Client = nil
+		return err
 	}
 	return nil
 }
 
-// LoadRoutes returns the current route set from the shared store handle.
+// LoadRoutes fetches the current route set from the daemon and caches it for
+// LANState/proberRoutes lookups. Returns store.Route shape for tab compat.
 func (rt *Runtime) LoadRoutes() ([]store.Route, error) {
-	return rt.Store.ListRoutes()
+	ctx, cancel := context.WithTimeout(rt.Ctx, 3*time.Second)
+	defer cancel()
+	routes, err := rt.Client.Routes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := routesFromAPI(routes, rt.tld)
+	rt.mu.Lock()
+	rt.routes = out
+	rt.mu.Unlock()
+	return out, nil
 }
 
-// StartProxy binds the TLS listener and serves until Ctx is cancelled.
-// Sends ProxyState updates via the returned channel.
+// StartProxy probes the daemon's liveness and emits ProxyState. It does NOT
+// start a TLS listener — the daemon owns the proxy. The channel emits one
+// initial state, then closes on Ctx.Done.
 func (rt *Runtime) StartProxy() <-chan ProxyState {
 	ch := make(chan ProxyState, 4)
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("proxy goroutine panic", "panic", r)
-				ch <- ProxyState{Up: false, Err: fmt.Errorf("panic: %v", r)}
-			}
-			close(ch)
-		}()
-		addr := net.JoinHostPort("0.0.0.0", strconv.Itoa(rt.Cfg.ProxyPort))
-		ln, err := tls.Listen("tcp", addr, &tls.Config{
-			GetCertificate: rt.Issuer.GetCertificate,
-			MinVersion:     tls.VersionTLS13,
-		})
+		defer close(ch)
+		ctx, cancel := context.WithTimeout(rt.Ctx, 2*time.Second)
+		defer cancel()
+		st, err := rt.Client.Status(ctx)
 		if err != nil {
-			ch <- ProxyState{Up: false, Err: err}
-			return
-		}
-		ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort)}
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("prober goroutine panic", "panic", r)
-				}
-			}()
-			rt.Prober.Run(rt.Ctx)
-		}()
-		routes, _ := rt.LoadRoutes()
-		ip, ipErr := mdnspkg.PrimaryLANIPv4()
-		if ipErr != nil {
-			rt.mdnsPub.Store(nil)
-			ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort), Err: fmt.Errorf("mdns: %w", ipErr)}
+			rt.daemonUp.Store(false)
+			ch <- ProxyState{Up: false, Err: fmt.Errorf("daemon not reachable: %w", err)}
 		} else {
-			pub := mdnspkg.New(ip)
-			rt.mdnsPub.Store(pub)
-			if err := pub.Set(routes); err != nil {
-				slog.Warn("mdns set failed", "err", err)
-				ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort), Err: fmt.Errorf("mdns: %w", err)}
+			rt.daemonUp.Store(true)
+			ch <- ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort)}
+			if rt.tld == "" {
+				rt.mu.Lock()
+				rt.tld = st.TLD
+				rt.mu.Unlock()
 			}
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						slog.Error("mdns close goroutine panic", "panic", r)
-					}
-				}()
-				<-rt.Ctx.Done()
-				if p := rt.mdnsPub.Load(); p != nil {
-					if err := p.Close(); err != nil {
-						slog.Warn("mdns close failed", "err", err)
-					}
-				}
-			}()
 		}
-		srv := proxy.NewServer(rt.Router, ln, rt.Stats)
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("proxy shutdown goroutine panic", "panic", r)
-				}
-			}()
-			<-rt.Ctx.Done()
-			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := srv.Shutdown(shutCtx); err != nil {
-				slog.Warn("proxy shutdown failed", "err", err)
-			}
-		}()
-		if err := srv.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			ch <- ProxyState{Up: false, Err: err}
-		}
+		<-rt.Ctx.Done()
 	}()
 	return ch
 }
 
-// RefreshTick is a tea.Cmd that returns a RoutesRefreshed after delay.
-func (rt *Runtime) RefreshTick(delay time.Duration) tea.Cmd {
-	return tea.Tick(delay, func(time.Time) tea.Msg {
-		rs, err := rt.LoadRoutes()
-		if err == nil {
-			rt.Router.Set(rs)
-			rt.Issuer.Prune(rt.Router.Has)
-			if p := rt.mdnsPub.Load(); p != nil {
-				if mErr := p.Set(rs); mErr != nil {
-					slog.Warn("mdns refresh failed", "err", mErr)
-				}
-			}
-		}
-		return RoutesRefreshed{Routes: rs, Err: err}
-	})
+func (rt *Runtime) SetSender(send func(tea.Msg)) {
+	rt.mu.Lock()
+	rt.send = send
+	rt.mu.Unlock()
 }
 
-// LANState returns a snapshot of mDNS advertising state and the number of
-// routes currently shared on the LAN.
-func (rt *Runtime) LANState() LANState {
-	var st LANState
-	if p := rt.mdnsPub.Load(); p != nil {
-		st.Advertising = true
-		if ip, err := mdnspkg.PrimaryLANIPv4(); err == nil {
-			st.IP = ip.String()
-		}
+func (rt *Runtime) push(msg tea.Msg) {
+	rt.mu.Lock()
+	send := rt.send
+	rt.mu.Unlock()
+	if send != nil {
+		send(msg)
 	}
-	routes, _ := rt.Store.ListRoutes()
+}
+
+func (rt *Runtime) HealthOf(domain string) prober.HealthState {
+	rt.mu.Lock()
+	rs, ok := rt.liveStats.Routes[domain]
+	tick := rt.liveStats.Tick
+	rt.mu.Unlock()
+	if !ok {
+		return prober.HealthState{}
+	}
+	st := prober.HealthState{LastProbe: tick}
+	switch rs.Health {
+	case api.HealthUp:
+		st.Status = prober.StatusUp
+	case api.HealthDown:
+		st.Status = prober.StatusDown
+	default:
+		st.Status = prober.StatusOff
+	}
+	return st
+}
+
+// LANState reports LAN-share visibility. Advertising tracks daemon liveness
+// (the daemon owns mDNS). IP is reported on a best-effort basis.
+func (rt *Runtime) LANState() LANState {
+	rt.mu.Lock()
+	routes := make([]store.Route, len(rt.routes))
+	copy(routes, rt.routes)
+	rt.mu.Unlock()
+	st := LANState{Advertising: rt.daemonUp.Load()}
+	if ip, err := mdnspkg.PrimaryLANIPv4(); err == nil {
+		st.IP = ip.String()
+	}
 	for _, r := range routes {
 		if r.Enabled && r.Shared {
 			st.SharedCount++
 		}
 	}
 	return st
+}
+
+// TotalReqs returns the cumulative request count reported by the daemon.
+// Returns 0 if no stats.tick has been received yet.
+func (rt *Runtime) TotalReqs() uint64 {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.liveStats.Total
+}
+
+// RPSWindow returns the latest rolling per-second request counts from the
+// daemon. Returns nil if no stats.tick has been received yet.
+func (rt *Runtime) RPSWindow() []float64 {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if len(rt.liveStats.RPS) == 0 {
+		return nil
+	}
+	out := make([]float64, len(rt.liveStats.RPS))
+	copy(out, rt.liveStats.RPS)
+	return out
+}
+
+// LastSeenHost returns the time host last served a request, per the daemon.
+func (rt *Runtime) LastSeenHost(host string) time.Time {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rs, ok := rt.liveStats.Routes[host]; ok {
+		return rs.LastSeen
+	}
+	return time.Time{}
+}
+
+func (rt *Runtime) SubscribeEvents() {
+	go func() {
+		defer func() { _ = recover() }()
+		ch := rt.Client.Subscribe(rt.Ctx)
+		for ev := range ch {
+			switch ev.Type {
+			case api.EventStatsTick:
+				var s api.Stats
+				if err := decodeEventData(ev, &s); err != nil {
+					continue
+				}
+				rt.mu.Lock()
+				rt.liveStats = s
+				rt.mu.Unlock()
+			case api.EventRouteAdded, api.EventRouteChanged, api.EventRouteRemoved:
+				rs, err := rt.LoadRoutes()
+				rt.push(RoutesRefreshed{Routes: rs, Err: err})
+			case client.EventClientReconnected:
+				rt.daemonUp.Store(true)
+				rt.push(ProxyState{Up: true, Addr: fmt.Sprintf(":%d", rt.Cfg.ProxyPort)})
+				rs, err := rt.LoadRoutes()
+				rt.push(RoutesRefreshed{Routes: rs, Err: err})
+			case client.EventClientDisconnected:
+				rt.daemonUp.Store(false)
+				rt.push(ProxyState{Up: false, Err: errors.New("daemon disconnected")})
+			}
+		}
+	}()
+}
+
+func (rt *Runtime) RefreshNow() tea.Cmd {
+	return func() tea.Msg {
+		rs, err := rt.LoadRoutes()
+		return RoutesRefreshed{Routes: rs, Err: err}
+	}
+}
+
+func decodeEventData(ev api.Event, out any) error {
+	if len(ev.Data) == 0 {
+		return errors.New("empty event data")
+	}
+	return jsonUnmarshal(ev.Data, out)
+}
+
+func routesFromAPI(in []api.Route, tld string) []store.Route {
+	out := make([]store.Route, 0, len(in))
+	for _, r := range in {
+		out = append(out, store.Route{
+			Domain:   r.Name + tld,
+			Target:   r.Target,
+			TLD:      tld,
+			Enabled:  r.Enabled,
+			Shared:   r.Share == api.ShareLAN,
+			Insecure: r.Insecure,
+			Source:   store.SourceAdHoc,
+		})
+	}
+	return out
 }

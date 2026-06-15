@@ -1,0 +1,45 @@
+package daemon
+
+import (
+	"net"
+	"net/url"
+	"regexp"
+
+	"github.com/venkatkrishna07/mkdev/internal/api"
+)
+
+var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+
+func ValidateName(name string) error {
+	if !nameRE.MatchString(name) {
+		return api.Error{
+			Code:    api.CodeRouteInvalidName,
+			Message: "name must match ^[a-z0-9][a-z0-9-]{0,62}$",
+		}
+	}
+	return nil
+}
+
+func ValidateTarget(target string) error {
+	if target == "" {
+		return targetErr("target empty")
+	}
+	if _, _, err := net.SplitHostPort(target); err == nil {
+		return nil
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return targetErr("invalid url: " + err.Error())
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return targetErr("target must be host:port or http(s)://host[:port]")
+	}
+	if u.Host == "" {
+		return targetErr("url missing host")
+	}
+	return nil
+}
+
+func targetErr(msg string) error {
+	return api.Error{Code: api.CodeRouteInvalidTarget, Message: msg}
+}

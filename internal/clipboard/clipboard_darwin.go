@@ -1,0 +1,14 @@
+//go:build darwin
+
+package clipboard
+
+import (
+	"os/exec"
+	"strings"
+)
+
+func copyText(s string) error {
+	cmd := exec.Command("/usr/bin/pbcopy")
+	cmd.Stdin = strings.NewReader(s)
+	return cmd.Run()
+}

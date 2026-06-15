@@ -58,6 +58,13 @@ func (r *Router) Set(routes []store.Route) {
 			slog.Warn("proxy: upstream error", "host", domain, "target", raw, "err", err)
 			http.Error(rw, fmt.Sprintf("mkdev: upstream %s unreachable: %v", raw, err), http.StatusBadGateway)
 		}
+		upstreamCaptured := upstream
+		proxyDomain := domain
+		rp.ModifyResponse = func(resp *http.Response) error {
+			rewriteLocationHeader(resp, upstreamCaptured, proxyDomain)
+			rewriteCookieDomain(resp, upstreamCaptured.Hostname(), proxyDomain)
+			return nil
+		}
 		next[domain] = entry{target: upstream.Host, shared: rt.Shared, proxy: rp}
 	}
 	r.table.Store(&next)
@@ -106,6 +113,56 @@ func (r *Router) LookupProxy(domain string) (*httputil.ReverseProxy, bool) {
 func (r *Router) Has(domain string) bool {
 	_, ok := r.Lookup(domain)
 	return ok
+}
+
+// rewriteLocationHeader keeps upstream redirects on the proxy domain so
+// clients don't follow them direct and lose credentials.
+func rewriteLocationHeader(resp *http.Response, upstream *url.URL, proxyDomain string) {
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return
+	}
+	u, err := url.Parse(loc)
+	if err != nil || u.Host == "" {
+		return
+	}
+	if !strings.EqualFold(u.Host, upstream.Host) && !strings.EqualFold(u.Hostname(), upstream.Hostname()) {
+		return
+	}
+	u.Scheme = "https"
+	u.Host = proxyDomain
+	resp.Header.Set("Location", u.String())
+}
+
+func rewriteCookieDomain(resp *http.Response, upstreamHost, proxyDomain string) {
+	cookies := resp.Header.Values("Set-Cookie")
+	if len(cookies) == 0 {
+		return
+	}
+	rewritten := make([]string, len(cookies))
+	for i, c := range cookies {
+		rewritten[i] = rewriteSingleCookieDomain(c, upstreamHost, proxyDomain)
+	}
+	resp.Header.Del("Set-Cookie")
+	for _, c := range rewritten {
+		resp.Header.Add("Set-Cookie", c)
+	}
+}
+
+func rewriteSingleCookieDomain(cookie, upstreamHost, proxyDomain string) string {
+	parts := strings.Split(cookie, ";")
+	for i, p := range parts {
+		kv := strings.SplitN(strings.TrimSpace(p), "=", 2)
+		if len(kv) != 2 || !strings.EqualFold(strings.TrimSpace(kv[0]), "Domain") {
+			continue
+		}
+		val := strings.TrimSpace(kv[1])
+		val = strings.TrimPrefix(val, ".")
+		if strings.EqualFold(val, upstreamHost) {
+			parts[i] = " Domain=" + proxyDomain
+		}
+	}
+	return strings.Join(parts, ";")
 }
 
 // Shared returns true if domain is registered AND marked shared. Returns
