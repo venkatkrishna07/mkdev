@@ -9,8 +9,24 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/venkatkrishna07/mkdev/internal/store"
+	"github.com/venkatkrishna07/mkdev/internal/upgrade"
 	"github.com/venkatkrishna07/mkdev/internal/version"
 )
+
+// upgradeSkip names top-level subcommands that drive the upgrade flow
+// themselves or run without a TTY, so the gate doesn't double-up or
+// trigger sudo prompts where they can't be answered.
+var upgradeSkip = map[string]bool{
+	"install":      true,
+	"uninstall":    true,
+	"serve":        true,
+	"hosts-helper": true,
+	"daemon":       true,
+	"bar":          true,
+	"version":      true,
+	"completion":   true,
+	"help":         true,
+}
 
 var (
 	flagVerbose bool
@@ -26,12 +42,13 @@ func New() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version.String(),
-		PersistentPreRun: func(_ *cobra.Command, _ []string) {
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 			lvl := slog.LevelInfo
 			if flagVerbose {
 				lvl = slog.LevelDebug
 			}
 			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})))
+			maybeUpgrade(cmd)
 		},
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
@@ -70,6 +87,34 @@ func Execute() int {
 		return 1
 	}
 	return 0
+}
+
+// maybeUpgrade runs the upgrade reconcile when the binary version differs
+// from the marker. Skipped for commands that own their own flow or run
+// without a TTY (see upgradeSkip).
+func maybeUpgrade(cmd *cobra.Command) {
+	top := topLevelName(cmd)
+	if upgradeSkip[top] {
+		return
+	}
+	home, err := HomeDir()
+	if err != nil {
+		return
+	}
+	needed, _, _ := upgrade.Check(home)
+	if !needed {
+		return
+	}
+	exe, _ := os.Executable()
+	_, _ = upgrade.Run(cmd.Context(), upgrade.ModeCLI, home, exe, cmd.ErrOrStderr())
+}
+
+func topLevelName(cmd *cobra.Command) string {
+	c := cmd
+	for c.HasParent() && c.Parent().HasParent() {
+		c = c.Parent()
+	}
+	return c.Name()
 }
 
 // HomeDir returns the resolved config directory. Honors --home and $MKDEV_HOME.

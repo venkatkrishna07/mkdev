@@ -16,6 +16,7 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/bar"
 	"github.com/venkatkrishna07/mkdev/internal/config"
 	"github.com/venkatkrishna07/mkdev/internal/daemon"
+	"github.com/venkatkrishna07/mkdev/internal/upgrade"
 )
 
 func newDaemonCmd() *cobra.Command {
@@ -58,6 +59,12 @@ func runDaemonServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer release()
+
+	if exe, err := os.Executable(); err == nil {
+		if _, err := upgrade.Run(cmd.Context(), upgrade.ModeDaemon, home, exe, nil); err != nil {
+			slog.Warn("daemon: upgrade reconcile", "err", err)
+		}
+	}
 
 	cfg, err := config.Load(filepath.Join(home, "config.toml"))
 	if err != nil {

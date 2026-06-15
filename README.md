@@ -18,11 +18,12 @@ What makes it different:
 ## What it does
 
 ```
-mkdev install                    # generates CA, trusts in system store
+mkdev install                    # CA + trust + daemon service + menu bar autostart
 mkdev add myapp localhost:3000   # routes https://myapp.local → localhost:3000
-mkdev serve                      # foreground TLS proxy
 curl https://myapp.local         # 200 from your local app
 ```
+
+`install` is one-shot: generates the CA, trusts it in the system store, installs and enables the daemon user-service (launchd / systemd), registers the menu bar to launch on login, and spawns the bar immediately when a GUI session is present. The daemon owns the proxy; the TUI (`mkdev` no args) and `mkdev add | remove | list` talk to it over `~/.mkdev/daemon.sock`.
 
 ![mkdev demo](assets/demo-add.gif)
 
@@ -93,9 +94,17 @@ Requires **Go 1.25+**.
 ## First run
 
 ```sh
-mkdev install   # one-time root CA trust
+mkdev install   # CA, trust, daemon service, bar autostart — one command
 mkdev           # launch TUI
 ```
+
+After `install`, the daemon runs in the background and the menu bar appears (macOS, Linux GNOME/KDE). The bar shows daemon status, route list, and per-route enable / LAN-share toggles; `Quit` exits the bar without stopping the daemon.
+
+## Upgrading
+
+Replace the binary (brew upgrade / `go install ...@latest` / new download). The next time you run any `mkdev` subcommand, the binary reconciles the parts that live outside it: rewrites the daemon plist / systemd unit and bar autostart entry to point at the new binary, re-asserts `/etc/hosts` for enabled routes, and re-trusts the CA if it was dropped. Sudo prompts run inline. If you only have the daemon running and never touch the CLI, the daemon does the safe (no-sudo) bits on its own startup and queues the rest until the next CLI command.
+
+Re-running `mkdev install` does the same thing explicitly and is always safe — every step is idempotent.
 
 ## Platform support
 
@@ -113,13 +122,16 @@ Firefox uses its own NSS store and is **not yet covered** — system Chrome/Safa
 
 | Command                              | Purpose                                                       |
 |--------------------------------------|---------------------------------------------------------------|
-| `install`                            | Generate the root CA, write defaults, trust in system store.  |
+| `install`                            | One-shot: CA + trust + daemon service + bar autostart. Pass `--no-service` for CA-only. |
 | `add <name> <target>`                | Add route. Appends a `127.0.0.1` entry to `/etc/hosts`.       |
 | `remove <name>`                      | Remove route and its `/etc/hosts` entry.                      |
 | `list`                               | List routes in the store.                                     |
-| `serve`                              | Run the TLS reverse proxy in the foreground.                  |
 | `tui`                                | Launch the TUI (also the default when run with no args).      |
-| `uninstall`                          | Untrust the CA. `--purge` also wipes `~/.mkdev/`.             |
+| `daemon serve`                       | Run the daemon in the foreground (normally driven by the service unit). |
+| `daemon stop`                        | Stop the running daemon and disable the user-service.         |
+| `daemon status`                      | Report installed / enabled / running state of the service.    |
+| `bar`                                | Launch the menu bar app. Autostarted by `install`.            |
+| `uninstall`                          | Untrust CA, remove `/etc/hosts` entries, uninstall daemon + bar autostart, wipe `~/.mkdev/`. |
 | `version`                            | Print version, commit, build date.                            |
 | `completion <bash\|zsh\|fish\|powershell>` | Emit shell completion script.                                 |
 | `hosts-helper`                       | Hidden. Invoked via `sudo` to mutate `/etc/hosts` atomically. |
@@ -164,7 +176,7 @@ log_max_size  = "100MB"    # reserved
 | Field           | Default     | Notes                                                       |
 |-----------------|-------------|-------------------------------------------------------------|
 | `tld`           | `.local`    | Auto-appended when `add <name>` has no dot.                 |
-| `proxy_port`    | `443`       | Set to `8443` to run `serve` without sudo for dev testing.  |
+| `proxy_port`    | `443`       | Set to `8443` if your platform won't let the user-service bind :443. |
 | `theme`         | `auto`      | Reserved for the upcoming TUI.                              |
 | `log_retention` | `7d`        | Reserved.                                                   |
 | `log_max_size`  | `100MB`     | Reserved.                                                   |
@@ -175,10 +187,11 @@ Override the config directory with `--home <path>` or `MKDEV_HOME=...`.
 
 - Generates an **ECDSA P-256** root CA at `~/.mkdev/ca/`. The private key is mode `0o400`.
 - Installs the CA in the OS-native trust store: macOS Keychain (`security`), Linux CA-bundle directory + `update-ca-*`, Windows `ROOT` store via `crypt32.dll`. Trust-store integration is adapted from [mkcert](https://github.com/FiloSottile/mkcert) (BSD-3) — see [`LICENSE-MKCERT`](./LICENSE-MKCERT).
-- On `add`, writes a route to a **bbolt** KV at `~/.mkdev/state.db` and appends a `127.0.0.1 <name>.<tld>` line to `/etc/hosts` via a `sudo`-invoked helper subcommand.
-- `serve` listens TLS on `0.0.0.0:<proxy_port>`, **mints leaf certs per SNI** on demand using the root CA, and reverse-proxies to the configured upstream.
-- The route table is re-read every 2 seconds, so `add` / `remove` take effect without restarting `serve`.
-- The proxy binds `0.0.0.0`, but non-loopback requests are 403'd unless the matching route is marked **shared** — see [LAN sharing](#lan-sharing--your-dev-server-on-your-phone).
+- On `add`, the daemon writes a route to a **bbolt** KV at `~/.mkdev/state.db` and appends a `127.0.0.1 <name>.<tld>` line to `/etc/hosts` via a `sudo`-invoked helper subcommand.
+- The daemon listens TLS on `0.0.0.0:<proxy_port>`, **mints leaf certs per SNI** on demand using the root CA, and reverse-proxies to the configured upstream.
+- The proxy's route table reloads in-process on every `add` / `remove`, no restart.
+- The proxy binds `0.0.0.0`, but non-loopback requests are 403'd unless the matching route is marked **shared** — see [LAN sharing](#lan-sharing).
+- Cross-host upstream redirects (e.g. a GitLab that 301s to its public hostname) have their `Location` and `Set-Cookie Domain` rewritten back to the proxy domain so clients don't drop credentials.
 
 ## Security
 
@@ -191,46 +204,43 @@ This tool installs a **private CA into your system trust store**. Anyone with re
 ## Uninstall
 
 ```sh
-mkdev uninstall           # untrust CA, remove /etc/hosts entries
-mkdev uninstall --purge   # also delete ~/.mkdev/
+mkdev uninstall   # stops + disables daemon, untrusts CA, clears /etc/hosts,
+                  # removes daemon service + bar autostart, wipes ~/.mkdev/
 ```
 
 If something gets stuck, open **Keychain Access.app**, search for `mkdev`, and delete by hand. Then `grep mkdev /etc/hosts` and clean any leftovers.
 
 
-## Daemon (preview)
+## Daemon and API
 
-`mkdev daemon serve` runs the local HTTP API as a long-running foreground process bound to a unix socket at `~/.mkdev/daemon.sock` (owner-only `0600`). Future milestones move the proxy, TUI, and a macOS status-bar app onto this daemon; today the API exposes route CRUD + status + shutdown so clients can be built against it.
+The daemon owns the proxy and the route store. It exposes a local HTTP API on `~/.mkdev/daemon.sock` (owner-only `0600`). The TUI, CLI subcommands, and menu bar are all clients of the daemon — only the daemon holds the bbolt lock.
+
+`mkdev install` installs the daemon as a user-service (launchd `LaunchAgent` on macOS, systemd `--user` on Linux) and enables it. It runs in the background and survives logout / login.
 
 ```sh
-mkdev daemon serve &
+mkdev daemon status                # installed / enabled / running
+mkdev daemon stop                  # stop + disable (prevents respawn)
 curl --unix-socket ~/.mkdev/daemon.sock http://x/v1/status
+curl --unix-socket ~/.mkdev/daemon.sock http://x/v1/routes
 curl --unix-socket ~/.mkdev/daemon.sock -X POST http://x/v1/routes \
      -H 'Content-Type: application/json' \
      -d '{"name":"foo","target":"localhost:3000"}'
-curl --unix-socket ~/.mkdev/daemon.sock http://x/v1/routes
 curl --unix-socket ~/.mkdev/daemon.sock -X DELETE http://x/v1/routes/foo
-curl --unix-socket ~/.mkdev/daemon.sock -X POST http://x/v1/shutdown
 ```
-
-The TUI and `mkdev add | list | remove` still operate directly on the local store; client migration through the daemon API lands in the next milestone. Until then, only one of {daemon, TUI, ad-hoc CLI command} can hold the bbolt lock at a time.
 
 ## Roadmap
 
 Next:
 
-- Client library + CLI subcommand migration onto the daemon API.
-- TUI migration: subscribe to the daemon's event stream (SSE), no in-process proxy.
-- macOS status-bar app (`mkdev bar`) consuming the same daemon API.
-- launchd / systemd user units for daemon supervision; auto-spawn fallback.
 - Project config file (`.mkdev.yaml` checked into the repo).
 - Firefox / NSS trust store integration.
 - Per-path routing (`/api` → 8080, `/ws` → 9000 on a single domain).
+- Windows menu bar app (today macOS + Linux only).
 
 ## Troubleshooting
 
 - **Firefox shows a red bar.** Firefox uses its own NSS store; system trust doesn't reach it. NSS integration is on the roadmap. For now, import `~/.mkdev/ca/rootCA.pem` manually under Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import.
-- **`serve` fails with "permission denied" on :443.** Either run as root, or set `proxy_port = 8443` in `~/.mkdev/config.toml` and use `https://name.local:8443`.
+- **Daemon fails to bind :443.** macOS/Linux let non-root user-services bind :443 via launchd / systemd capabilities. If your distro restricts this, set `proxy_port = 8443` in `~/.mkdev/config.toml` and use `https://name.local:8443`.
 - **`mkdev add` keeps asking for sudo.** Sudo's per-session cache expires (default 5 min). Use the TUI Domains tab instead — it elevates via `osascript` (macOS GUI prompt) or `pkexec` (Linux Polkit).
 - **`/etc/hosts` already has an entry for that name.** `mkdev add` is idempotent and only appends when no `mkdev`-managed entry exists. Remove the prior entry by hand or pick a different name.
 

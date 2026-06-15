@@ -16,6 +16,7 @@ import (
 	"github.com/venkatkrishna07/mkdev/internal/daemon"
 	"github.com/venkatkrishna07/mkdev/internal/hosts"
 	"github.com/venkatkrishna07/mkdev/internal/store"
+	"github.com/venkatkrishna07/mkdev/internal/upgrade"
 	"github.com/venkatkrishna07/mkdev/internal/version"
 )
 
@@ -105,6 +106,11 @@ func runInstall(cmd *cobra.Command, _ []string) error {
 		_, _ = fmt.Fprintln(w)
 		serviceErrs = installServiceLayer(cmd)
 	}
+
+	if err := upgrade.WriteMarker(home, version.String()); err != nil {
+		slog.Warn("install: write upgrade marker", "err", err)
+	}
+	_ = upgrade.ClearPending(home)
 
 	_, _ = fmt.Fprintln(w)
 	if serviceErrs > 0 {
