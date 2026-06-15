@@ -98,7 +98,35 @@ mkdev install   # CA, trust, daemon service, bar autostart — one command
 mkdev           # launch TUI
 ```
 
-After `install`, the daemon runs in the background and the menu bar appears (macOS, Linux GNOME/KDE). The bar shows daemon status, route list, and per-route enable / LAN-share toggles; `Quit` exits the bar without stopping the daemon.
+After `install`, the daemon runs in the background and the menu bar appears (macOS, Linux GNOME/KDE, Windows). The bar shows daemon status, route list, and per-route enable / LAN-share toggles; `Quit` exits the bar without stopping the daemon.
+
+## Menu bar
+
+The bar is the always-on UI. It lives in the system tray and talks to the daemon over `~/.mkdev/daemon.sock`. Launches on login (autostart registered by `install`); also runnable foreground with `mkdev bar`.
+
+What it shows:
+
+- **Status dot** — green up, red down, yellow probing, grey off. Reflects the daemon health.
+- **Header** — `mkdev v0.4.0` + daemon PID + uptime + listening proxy port.
+- **Routes** — every route in the store, top-down. Each entry shows `name.tld → target` plus suffix badges (` · disabled`, ` · LAN`).
+
+What it does (click on a route):
+
+- **Open in browser** — opens `https://name.tld` with the system default handler.
+- **Copy URL** — copies the proxy URL to the clipboard (`pbcopy` / `wl-copy` / `xclip` / `clip.exe`).
+- **Enable / Disable** — flips the route's `Enabled` flag. Disabled routes stay in the store but stop being proxied.
+- **Share on LAN** — toggles mDNS advertise + LAN-side ACL.
+
+Bar-level actions:
+
+- **Stop daemon** — calls `DisableUnit` first so launchd / systemd `KeepAlive` doesn't immediately respawn it, then sends shutdown over the socket.
+- **Quit** — exits the bar process only. The daemon and proxy keep running.
+
+Notes:
+
+- Two bar instances can't run at once (PID-file lock; the second exits immediately).
+- The bar reconnects automatically when the daemon restarts. The status dot updates without a manual refresh.
+- Only the bar (and `mkdev daemon stop`) cleanly stop the supervised daemon — killing the daemon process directly will get it respawned by launchd / systemd.
 
 ## Upgrading
 
@@ -232,10 +260,8 @@ curl --unix-socket ~/.mkdev/daemon.sock -X DELETE http://x/v1/routes/foo
 
 Next:
 
-- Project config file (`.mkdev.yaml` checked into the repo).
 - Firefox / NSS trust store integration.
 - Per-path routing (`/api` → 8080, `/ws` → 9000 on a single domain).
-- Windows menu bar app (today macOS + Linux only).
 
 ## Troubleshooting
 
