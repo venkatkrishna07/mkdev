@@ -279,4 +279,3 @@ func routesFromAPI(in []api.Route, tld string) []store.Route {
 	}
 	return out
 }
-
