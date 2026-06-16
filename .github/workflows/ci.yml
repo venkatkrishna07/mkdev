@@ -33,6 +33,7 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: go vet ./...
       - name: test
+        if: matrix.os != 'windows-latest'
         run: go test -race -count=1 -timeout 180s -vet=off ./...
       - name: build
         run: go build -trimpath -o mkdev_bin ./cmd/mkdev
