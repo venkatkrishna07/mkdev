@@ -20,13 +20,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Disable Defender realtime scan on tmp + workspace (Windows)
+      - name: Windows test prep (Defender exclusions + GOCACHE off Temp)
         if: matrix.os == 'windows-latest'
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $env:RUNNER_TEMP -ErrorAction SilentlyContinue
           Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE -ErrorAction SilentlyContinue
           Add-MpPreference -ExclusionExtension ".exe" -ErrorAction SilentlyContinue
+          $cache = "D:\go-build-cache"
+          New-Item -ItemType Directory -Path $cache -Force | Out-Null
+          "GOCACHE=$cache" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: gofmt
         if: matrix.os != 'windows-latest'
         run: |
@@ -43,7 +46,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            go test -count=1 -timeout 180s -vet=off -p 2 ./...
+            go test -count=1 -timeout 180s -vet=off -p 1 ./...
           else
             go test -race -count=1 -timeout 180s -vet=off ./...
           fi
