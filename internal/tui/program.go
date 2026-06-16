@@ -303,23 +303,24 @@ func (m rootModel) handleGlobalKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(k, m.keys.PrevTab):
 		m.active = (m.active - 1 + tabIndex(len(tabLabels))) % tabIndex(len(tabLabels))
 		return m, nil
-	case key.Matches(k, m.keys.Tab1):
-		m.active = tabDashboard
-		return m, nil
-	case key.Matches(k, m.keys.Tab2):
-		m.active = tabDomains
-		return m, nil
-	case key.Matches(k, m.keys.Tab3):
-		m.active = tabProjects
-		return m, nil
-	case key.Matches(k, m.keys.Tab4):
-		m.active = tabLogs
-		return m, nil
-	case key.Matches(k, m.keys.Tab5):
-		m.active = tabDoctor
-		return m, nil
-	case key.Matches(k, m.keys.Tab6):
-		m.active = tabSettings
+	case key.Matches(k, m.keys.Tab1, m.keys.Tab2, m.keys.Tab3, m.keys.Tab4, m.keys.Tab5, m.keys.Tab6):
+		if m.active == tabSettings {
+			return m.forwardToActiveTab(k)
+		}
+		switch {
+		case key.Matches(k, m.keys.Tab1):
+			m.active = tabDashboard
+		case key.Matches(k, m.keys.Tab2):
+			m.active = tabDomains
+		case key.Matches(k, m.keys.Tab3):
+			m.active = tabProjects
+		case key.Matches(k, m.keys.Tab4):
+			m.active = tabLogs
+		case key.Matches(k, m.keys.Tab5):
+			m.active = tabDoctor
+		case key.Matches(k, m.keys.Tab6):
+			m.active = tabSettings
+		}
 		return m, nil
 	}
 	if m.active != tabDomains {
