@@ -20,6 +20,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Disable Defender realtime scan on tmp + workspace (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionExtension ".exe" -ErrorAction SilentlyContinue
       - name: gofmt
         if: matrix.os != 'windows-latest'
         run: |
