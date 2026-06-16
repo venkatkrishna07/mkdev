@@ -72,7 +72,7 @@ go install github.com/venkatkrishna07/mkdev/cmd/mkdev@v0.2.0
 
 ### Direct download
 
-Pre-built binaries for macOS (Intel + Apple Silicon), Linux (amd64 + arm64), and Windows (amd64) are published on the [Releases page](https://github.com/venkatkrishna07/mkdev/releases). Each release includes `checksums.txt` plus a cosign keyless signature (`checksums.txt.sig` + `.pem`) — see [SECURITY.md#verifying-releases](./SECURITY.md) for the verify command.
+Pre-built binaries for macOS (Intel + Apple Silicon), Linux (amd64), and Windows (amd64) are published on the [Releases page](https://github.com/venkatkrishna07/mkdev/releases). Linux arm64 requires building from source (`task build` on an arm64 host) — multi-arch GTK/AppIndicator dev headers conflict in the cross-build container; native arm64 release runner is on the roadmap. Each release includes `checksums.txt` plus a cosign keyless signature (`checksums.txt.sig` + `.pem`) — see [SECURITY.md#verifying-releases](./SECURITY.md) for the verify command.
 
 On macOS, if Gatekeeper blocks a direct-download binary:
 
