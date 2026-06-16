@@ -13,7 +13,7 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/goreleaser/goreleaser-cross:v1.26.4
+      image: ghcr.io/goreleaser/goreleaser-cross:v1.26.3
       options: --user root
     steps:
       - name: Mark workspace safe for git
